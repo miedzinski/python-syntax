@@ -10,7 +10,10 @@ pub enum Token {
     Integer(num_bigint::BigUint),
     Float(f64),
     Imaginary(f64),
-    String { value: String, formatted: bool },
+    String {
+        value: String,
+        formatted: bool,
+    },
     Bytes(Vec<u8>),
 
     // Symbols

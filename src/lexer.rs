@@ -4,34 +4,28 @@ use std::convert::TryInto;
 use num_bigint::BigUint;
 use regex::{CaptureLocations, Regex};
 
-use crate::source::Location;
-use crate::token::{self, Token};
+use crate::{
+    source::Location,
+    token::{self, Token},
+};
 
 const TABSIZE: usize = 8;
 
 pub type LexResult = Result<(Location, Token, Location), LexError>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LexError {
-    kind: LexErrorKind,
-    location: Location,
+    pub kind: LexErrorKind,
+    pub location: Location,
 }
 
 impl LexError {
     fn new(kind: LexErrorKind, location: Location) -> LexError {
         LexError { kind, location }
     }
-
-    pub fn kind(&self) -> LexErrorKind {
-        self.kind
-    }
-
-    pub fn location(&self) -> Location {
-        self.location
-    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum LexErrorKind {
     UnexpectedCharacter(char),
     UnmatchedDedent,
@@ -177,23 +171,23 @@ impl<'a> Lexer<'a> {
                     if bytes.peek() == Some(&&b'\n') {
                         continue;
                     } else {
-                        self.location = Location::new(self.location.line() + 1, 1);
+                        self.location = Location::new(self.location.line + 1, 1);
                         self.alt_col = 1;
                     }
                 }
                 b'\n' => {
-                    self.location = Location::new(self.location.line() + 1, 1);
+                    self.location = Location::new(self.location.line + 1, 1);
                     self.alt_col = 1;
                 }
                 b'\t' => {
                     self.location = Location::new(
-                        self.location.line(),
-                        self.location.column() + TABSIZE - ((self.location.column() - 1) % TABSIZE),
+                        self.location.line,
+                        self.location.column + TABSIZE - ((self.location.column - 1) % TABSIZE),
                     );
                     self.alt_col += 1;
                 }
                 _ => {
-                    self.location = Location::new(self.location.line(), self.location.column() + 1);
+                    self.location = Location::new(self.location.line, self.location.column + 1);
                     self.alt_col += 1;
                 }
             }
@@ -209,7 +203,7 @@ impl<'a> Lexer<'a> {
         if self.pending > 0 {
             // Process pending DEDENT
             self.pending -= 1;
-            let loc = Location::new(self.location.line(), 0);
+            let loc = Location::new(self.location.line, 0);
             return Ok((loc, Token::Dedent, loc));
         }
 
@@ -224,9 +218,9 @@ impl<'a> Lexer<'a> {
 
         if self.newline && !(self.matches(1) || self.matches(2)) {
             // Not a blank line, handle indentation
-            let col = self.location.column();
+            let col = self.location.column;
             let (last, alt_last) = *self.indents.last().unwrap();
-            let emit_loc = Location::new(self.location.line(), col);
+            let emit_loc = Location::new(self.location.line, col);
             if col == last {
                 // No change
                 if self.alt_col != alt_last {
@@ -286,21 +280,21 @@ impl<'a> Lexer<'a> {
         if self.matches(3) {
             // EOF
             self.exhausted = true;
-            return Ok((start, Token::Eof, start));
+            Ok((start, Token::Eof, start))
         } else if self.matches(4) && !self.matches(5) {
             // Float
-            return Ok((start, Token::Float(Self::parse_float(lex).unwrap()), end));
+            Ok((start, Token::Float(Self::parse_float(lex).unwrap()), end))
         } else if self.matches(5) || self.matches(6) {
             // Imaginary (float)
             let lex = &lex[..lex.len() - 1]; // Strip trailing j
-            return Ok((
+            Ok((
                 start,
                 Token::Imaginary(Self::parse_float(lex).unwrap()),
                 end,
-            ));
+            ))
         } else if self.matches(7) {
             // Integer
-            return Ok((start, Token::Integer(Self::parse_int(lex).unwrap()), end));
+            Ok((start, Token::Integer(Self::parse_int(lex).unwrap()), end))
         } else if self.matches(8) {
             // String
             if self.matches(13) {
@@ -331,7 +325,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     value.as_bytes().to_vec()
                 };
-                return Ok((start, Token::Bytes(value), end));
+                Ok((start, Token::Bytes(value), end))
             } else {
                 let value = if !raw {
                     Self::parse_str(value).map_err(|e| {
@@ -340,7 +334,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     value.to_string()
                 };
-                return Ok((start, Token::String { value, formatted }, end));
+                Ok((start, Token::String { value, formatted }, end))
             }
         } else if self.matches(14) {
             // Operator or delimiter
@@ -350,16 +344,17 @@ impl<'a> Lexer<'a> {
                 Token::ParenClose | Token::BracketClose | Token::BraceClose => self.parens -= 1,
                 _ => (),
             }
-            return Ok((start, tok.clone(), end));
+            Ok((start, tok.clone(), end))
         } else if self.matches(15) {
             // Keyword
             let tok = token::KEYWORDS.get(lex).unwrap();
-            return Ok((start, tok.clone(), end));
+            Ok((start, tok.clone(), end))
         } else if self.matches(16) {
             // Identifier
-            return Ok((start, Token::Name(lex.into()), end));
+            Ok((start, Token::Name(lex.into()), end))
+        } else {
+            unsafe { std::hint::unreachable_unchecked() }
         }
-        unreachable!();
     }
 
     fn parse_bytes(mut s: &str) -> Result<Vec<u8>, ParseStringError> {
@@ -474,7 +469,7 @@ mod tests {
 
     fn lex(i: &str) -> Vec<Result<Token, LexErrorKind>> {
         Lexer::new(i)
-            .map(|x| x.map(|x| x.1).map_err(|e| e.kind()))
+            .map(|x| x.map(|x| x.1).map_err(|e| e.kind))
             .collect()
     }
 

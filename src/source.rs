@@ -1,19 +1,29 @@
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct Location {
-    line: usize,
-    col: usize,
+    pub line: usize,
+    pub column: usize,
 }
 
 impl Location {
-    pub fn new(line: usize, col: usize) -> Location {
-        Location { line, col }
+    pub fn new(line: usize, column: usize) -> Location {
+        Location { line, column }
     }
+}
 
-    pub fn line(&self) -> usize {
-        self.line
-    }
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct Span {
+    pub start: Location,
+    pub end: Location,
+}
 
-    pub fn column(&self) -> usize {
-        self.col
+impl Span {
+    pub fn new(start: Location, end: Location) -> Span {
+        Span { start, end }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
+pub struct Spanned<T> {
+    pub span: Span,
+    pub kind: T,
 }

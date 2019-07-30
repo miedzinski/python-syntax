@@ -248,36 +248,23 @@ pub enum ExpressionKind {
     Attribute {
         value: Box<Expression>,
         attr: String,
-        ctx: ExprContext,
     },
     Subscript {
         value: Box<Expression>,
         slice: Slice,
-        ctx: ExprContext,
     },
     Starred {
         value: Box<Expression>,
-        ctx: ExprContext,
     },
     Name {
         id: String,
-        ctx: ExprContext,
     },
     List {
         elts: Vec<Expression>,
-        ctx: ExprContext,
     },
     Tuple {
         elts: Vec<Expression>,
-        ctx: ExprContext,
     },
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum ExprContext {
-    Load,
-    Store,
-    Del,
 }
 
 #[derive(Debug, Clone)]

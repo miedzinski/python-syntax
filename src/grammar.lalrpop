@@ -200,10 +200,7 @@ Comparison: ast::Expression = <l:@L> <e:Expr> <v:(CompOp Expr)*> <r:@R> => {
 };
 
 StarExpr: ast::Expression = <l:@L> "*" <e:Expr> <r:@R> => {
-    ast::ExpressionKind::Starred {
-        value: Box::new(e),
-        ctx: ast::ExprContext::Load,
-    }.spanned(l, r)
+    ast::ExpressionKind::Starred { value: Box::new(e) }.spanned(l, r)
 };
 
 BinExpr<O, E>: ast::Expression = <l:@L> <e:E> <v:(O E)*> => {
@@ -290,12 +287,10 @@ AtomExpr: ast::Expression = {
     <l:@L> <e:Atom> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
         value: Box::new(e),
         slice: s,
-        ctx: ast::ExprContext::Load,
     }.spanned(l, r),
     <l:@L> <e:Atom> "." <n:NAME> <r:@R> => ast::ExpressionKind::Attribute {
         value: Box::new(e),
         attr: n,
-        ctx: ast::ExprContext::Load,
     }.spanned(l, r),
     Atom,
 };
@@ -325,7 +320,6 @@ Arg: (Option<ast::Expression>, Option<ast::Keyword>) = {
     <l:@L> "*" <t:Test> <r:@R> => {
         let arg = ast::ExpressionKind::Starred {
             value: Box::new(t),
-            ctx: ast::ExprContext::Load,
         }.spanned(l, r);
         (Some(arg), None)
     },
@@ -348,10 +342,7 @@ SubscriptList: ast::Slice = <t:Subscript> <v:("," <Subscript>)*> <c:","?> => {
                     .collect::<Vec<_>>();
                 let tup = ast::Expression {
                     span: Span::new(elts[0].span.start, elts.last().unwrap().span.end),
-                    kind: ast::ExpressionKind::Tuple {
-                        elts,
-                        ctx: ast::ExprContext::Load,
-                    },
+                    kind: ast::ExpressionKind::Tuple { elts },
                 };
                 return ast::Slice::Index { value: Box::new(tup) }
             }
@@ -383,10 +374,9 @@ Atom: ast::Expression = {
             generators: c,
         }.spanned(l, r)
     },
-    <l:@L> "[" <v:Comma<TestOrStar>?> ","? "]" <r:@R> => ast::ExpressionKind::List {
-        elts: v.unwrap_or_default(),
-        ctx: ast::ExprContext::Load,
-    }.spanned(l, r),
+    <l:@L> "[" <v:Comma<TestOrStar>?> ","? "]" <r:@R> => {
+        ast::ExpressionKind::List { elts: v.unwrap_or_default() }.spanned(l, r)
+    },
     <l:@L> "{" <t:Test> <c:Comprehension+> "}" <r:@R> => {
         ast::ExpressionKind::SetComp {
             elt: Box::new(t),
@@ -407,10 +397,7 @@ Atom: ast::Expression = {
         let (keys, values) = v.unwrap_or_default().into_iter().unzip();
         ast::ExpressionKind::Dict { keys, values }.spanned(l, r)
     },
-    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name {
-        id,
-        ctx: ast::ExprContext::Load,
-    }.spanned(l, r),
+    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name { id }.spanned(l, r),
     <l:@L> <n:Number> <r:@R> => ast::ExpressionKind::Num { n }.spanned(l, r),
     <l:@L> <v:BYTES+> <r:@R> => ast::ExpressionKind::Bytes {
         s: v.concat(),
@@ -478,10 +465,7 @@ SingleOrTuple<T>: ast::Expression = {
     <l:@L> <t:T> <v:("," <T>)*> <c:","?> <r:@R> => {
         if !v.is_empty() || c.is_some() {
             let elts = iter::once(t).chain(v).collect();
-            ast::ExpressionKind::Tuple {
-                elts,
-                ctx: ast::ExprContext::Load,
-            }.spanned(l, r)
+            ast::ExpressionKind::Tuple { elts }.spanned(l, r)
         } else {
             t
         }

@@ -412,7 +412,13 @@ Atom: ast::Expression = {
         ctx: ast::ExprContext::Load,
     }.spanned(l, r),
     <l:@L> <n:Number> <r:@R> => ast::ExpressionKind::Num { n }.spanned(l, r),
-    // String
+    <l:@L> <v:BYTES+> <r:@R> => ast::ExpressionKind::Bytes {
+        s: v.concat(),
+    }.spanned(l, r),
+    <l:@L> <v:STRING+> <r:@R> => {
+        ast::ExpressionKind::Str { s: v.concat() }.spanned(l, r)
+    },
+    FSTRING+ => unimplemented!(),
     <l:@L> "..." <r:@R> => ast::ExpressionKind::Ellipsis.spanned(l, r),
     <l:@L> <c:NameConstant> <r:@R> => ast::ExpressionKind::NameConstant {
         value: c,
@@ -511,7 +517,8 @@ extern {
         INTEGER => Token::Integer(<num_bigint::BigUint>),
         FLOAT => Token::Float(<f64>),
         IMAGINARY => Token::Imaginary(<f64>),
-        STRING => Token::String { value: <String>, formatted: <bool> },
+        STRING => Token::String(<String>),
+        FSTRING => Token::FormattedString(<String>),
         BYTES => Token::Bytes(<Vec<u8>>),
 
         "(" => Token::ParenOpen,

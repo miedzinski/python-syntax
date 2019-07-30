@@ -227,6 +227,9 @@ pub enum ExpressionKind {
     Num {
         n: Number,
     },
+    Str {
+        s: String,
+    },
     FormattedValue {
         value: Box<Expression>,
         conversion: Option<Conversion>,
@@ -432,6 +435,22 @@ where
     Ok(())
 }
 
+fn write_escaped(f: &mut fmt::Formatter<'_>, b: u8) -> fmt::Result {
+    match b {
+        b'"' => f.write_str("\\\""),
+        b'\\' => f.write_str("\\"),
+        b'\n' => f.write_str("\\n"),
+        b'\r' => f.write_str("\\r"),
+        b'\t' => f.write_str("\\t"),
+        b'\x07' => f.write_str("\\a"),
+        b'\x08' => f.write_str("\\b"),
+        b'\x0c' => f.write_str("\\f"),
+        b'\x0b' => f.write_str("\\v"),
+        b if b.is_ascii_graphic() => f.write_str(&char::from(b).to_string()),
+        b => write!(f, "\\x{:x}", b),
+    }
+}
+
 impl Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)
@@ -531,9 +550,22 @@ impl Display for ExpressionKind {
                 f.write_str(")")
             }
             ExpressionKind::Num { n } => write!(f, "{}", n),
+            ExpressionKind::Str { s } => {
+                f.write_str("\"")?;
+                for b in s.bytes() {
+                    write_escaped(f, b)?;
+                }
+                f.write_str("\"")
+            }
             ExpressionKind::FormattedValue { .. } => unimplemented!(),
             ExpressionKind::JoinedStr { .. } => unimplemented!(),
-            ExpressionKind::Bytes { .. } => unimplemented!(),
+            ExpressionKind::Bytes { s } => {
+                f.write_str("b\"")?;
+                for b in s {
+                    write_escaped(f, *b)?;
+                }
+                f.write_str("\"")
+            }
             ExpressionKind::NameConstant { value } => write!(f, "{}", value),
             ExpressionKind::Ellipsis { .. } => write!(f, "..."),
             ExpressionKind::Attribute { value, attr, .. } => write!(f, "{}.{}", value, attr),

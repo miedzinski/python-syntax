@@ -183,6 +183,14 @@ pub enum Token {
     Await,
     // `async`
     Async,
+
+    // Used by LALRPOP
+    #[doc(hidden)]
+    Module,
+    #[doc(hidden)]
+    Interactive,
+    #[doc(hidden)]
+    Eval,
 }
 
 lazy_static::lazy_static! {

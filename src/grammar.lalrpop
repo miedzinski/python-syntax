@@ -1,0 +1,600 @@
+// vi:syntax=rust
+
+use std::{
+    default::Default,
+    iter,
+};
+
+use crate::{
+    ast,
+    lexer::LexError,
+    source::{Location, Span},
+    token::Token,
+};
+
+grammar;
+
+pub Program: ast::Program = {
+    MODULE <Module> => ast::Program::Module(<>),
+    INTERACTIVE <Interactive> => ast::Program::Interactive(<>),
+    EVAL <Eval> => ast::Program::Eval(<>),
+};
+
+Module: ast::Module = {
+    NEWLINE* <(<Statement> NEWLINE*)*> => ast::Module {
+        body: <>.into_iter().flatten().collect(),
+    },
+};
+
+Interactive: ast::Interactive = {
+    NEWLINE => ast::Interactive { body: vec![] },
+    <body:SimpleStatement> => ast::Interactive {<>},
+    <s:CompoundStatement> NEWLINE => ast::Interactive { body: vec![<>] },
+};
+
+Eval: ast::Eval = {
+    <TestList> NEWLINE* EOF => ast::Eval { body: Box::new(<>) },
+};
+
+TypedParamList = ParamList<TypedParam>;
+UntypedParamList = ParamList<UntypedParam>;
+
+ParamList<P>: ast::Arguments = {
+    <v:Comma<SingleParam<P>>> <s:("," <StarParamList<P>>)?> ","? => {
+        let mut s = s.unwrap_or_default();
+        s.args = v;
+        s
+    },
+    <StarParamList<P>> ","?,
+};
+
+#[inline]
+StarParamList<P>: ast::Arguments = {
+    <va:StarParam<P>> <v:("," <Comma<SingleParam<P>>>)?> <kw:("," <KwParam<P>>)?> => {
+        ast::Arguments {
+            vararg: Some(va),
+            kwonlyargs: v.unwrap_or_default(),
+            kwarg: kw,
+            .. Default::default()
+        }
+    },
+    "*" "," <v:Comma<SingleParam<P>>> <kw:("," <KwParam<P>>)?> => {
+        ast::Arguments {
+            kwonlyargs: v,
+            kwarg: kw,
+            .. Default::default()
+        }
+    },
+    KwParam<P> => ast::Arguments {
+        kwarg: Some(<>),
+        .. Default::default()
+    },
+};
+
+SingleParam<P>: ast::Arg = {OptionalParam<P>, RequiredParam<P>};
+
+RequiredParam<P>: ast::Arg = <l:@L> <p:P> <r:@R> => {
+    ast::Arg {
+        span: Span::new(l, r),
+        arg: p.0,
+        annotation: p.1.map(Box::new),
+        kind: ast::ArgKind::Required,
+    }
+};
+
+OptionalParam<P>: ast::Arg = <l:@L> <p:P> <t:("=" <Test>)> <r:@R> => {
+    ast::Arg {
+        span: Span::new(l, r),
+        arg: p.0,
+        annotation: p.1.map(Box::new),
+        kind: ast::ArgKind::Optional(Box::new(t)),
+    }
+};
+
+StarParam<P>: ast::Arg = <l:@L> "*" <p:P> <r:@R> => {
+    ast::Arg {
+        span: Span::new(l, r),
+        arg: p.0,
+        annotation: p.1.map(Box::new),
+        kind: ast::ArgKind::Vararg,
+    }
+};
+
+KwParam<P>: ast::Arg = <l:@L> "**" <p:P> <r:@R> => {
+    ast::Arg {
+        span: Span::new(l, r),
+        arg: p.0,
+        annotation: p.1.map(Box::new),
+        kind: ast::ArgKind::Kwarg,
+    }
+};
+ 
+TypedParam: (String, Option<ast::Expression>) = <n:NAME> <t:(":" <Test>)> => (n, Some(t));
+UntypedParam: (String, Option<ast::Expression>) = <NAME> => (<>, None);
+
+Statement: Vec<ast::Statement> = {
+    SimpleStatement,
+    <CompoundStatement> => vec![<>],
+};
+
+SimpleStatement: Vec<ast::Statement> = <Sep<SmallStatement, ";">> ";"? NEWLINE;
+
+SmallStatement: ast::Statement = {};
+
+CompoundStatement: ast::Statement = {};
+
+Test: ast::Expression = {Cond, OrTest, Lambda<Test>};
+
+Cond: ast::Expression = {
+    <l:@L> <t1:OrTest> "if" <t2:OrTest> "else" <t3:Test> <r:@R> => {
+        ast::ExpressionKind::IfExp {
+            test: Box::new(t2),
+            body: Box::new(t1),
+            orelse: Box::new(t3),
+        }.spanned(l, r)
+    },
+};
+
+TestNoCond: ast::Expression = {OrTest, Lambda<TestNoCond>};
+
+Lambda<T>: ast::Expression = {
+    <l:@L> "lambda" <v:UntypedParamList?> ":" <t:T> <r:@R> => {
+        ast::ExpressionKind::Lambda {
+            args: Box::new(v.unwrap_or_default()),
+            body: Box::new(t),
+        }.spanned(l, r)
+    },
+};
+
+BoolExpr<O, E>: ast::Expression = <l:@L> <e:E> <v:(O E)*> => {
+    v.into_iter().fold(e, |acc, (op, e)| {
+        let r = e.span.end;
+        ast::ExpressionKind::BoolOp {
+            left: Box::new(acc),
+            op,
+            right: Box::new(e),
+        }.spanned(l, r)
+    })
+};
+
+OrOp: ast::BooleanOperator = "or" => ast::BooleanOperator::Or;
+AndOp: ast::BooleanOperator = "and" => ast::BooleanOperator::And;
+
+OrTest: ast::Expression = BoolExpr<OrOp, AndTest>;
+AndTest: ast::Expression = BoolExpr<AndOp, NotTest>;
+
+NotTest: ast::Expression = {
+    <l:@L> "not" <t:NotTest> <r:@R> => {
+        ast::ExpressionKind::UnaryOp {
+            op: ast::UnaryOperator::Not,
+            operand: Box::new(t),
+        }.spanned(l, r)
+    },
+    Comparison,
+};
+
+CompOp: ast::ComparisonOperator = {
+    "<" => ast::ComparisonOperator::Less,
+    ">" => ast::ComparisonOperator::Greater,
+    "==" => ast::ComparisonOperator::Equal,
+    ">=" => ast::ComparisonOperator::GreaterEqual,
+    "<=" => ast::ComparisonOperator::LessEqual,
+    "!=" => ast::ComparisonOperator::NotEqual,
+    "in" => ast::ComparisonOperator::In,
+    "not" "in" => ast::ComparisonOperator::NotIn,
+    "is" "not" => ast::ComparisonOperator::IsNot,
+    "is" => ast::ComparisonOperator::Is,
+};
+
+Comparison: ast::Expression = <l:@L> <e:Expr> <v:(CompOp Expr)*> <r:@R> => {
+    if !v.is_empty() {
+        let (ops, comparators) = v.into_iter().unzip();
+        ast::ExpressionKind::Compare {
+            left: Box::new(e),
+            ops,
+            comparators,
+        }.spanned(l, r)
+    } else {
+        e
+    }
+};
+
+StarExpr: ast::Expression = <l:@L> "*" <e:Expr> <r:@R> => {
+    ast::ExpressionKind::Starred {
+        value: Box::new(e),
+        ctx: ast::ExprContext::Load,
+    }.spanned(l, r)
+};
+
+BinExpr<O, E>: ast::Expression = <l:@L> <e:E> <v:(O E)*> => {
+    v.into_iter().fold(e, |acc, (op, e)| {
+        let r = e.span.end;
+        ast::ExpressionKind::BinOp {
+            left: Box::new(acc),
+            op,
+            right: Box::new(e),
+        }.spanned(l, r)
+    })
+};
+
+BitOrOp: ast::Operator = "|" => ast::Operator::BitOr;
+Expr: ast::Expression = BinExpr<BitOrOp, XorExpr>;
+
+XorOp: ast::Operator = "^" => ast::Operator::BitXor;
+XorExpr: ast::Expression = BinExpr<XorOp, AndExpr>;
+
+BitAndOp: ast::Operator = "&" => ast::Operator::BitAnd;
+AndExpr: ast::Expression = BinExpr<BitAndOp, ShiftExpr>;
+
+ShiftOp: ast::Operator = {
+    "<<" => ast::Operator::LeftShift,
+    ">>" => ast::Operator::RightShift,
+};
+ShiftExpr: ast::Expression = BinExpr<ShiftOp, ArithExpr>;
+
+AddSubOp: ast::Operator = {
+    "+" => ast::Operator::Addition,
+    "-" => ast::Operator::Subtraction,
+};
+ArithExpr: ast::Expression = BinExpr<AddSubOp, Term>;
+
+MulDivModOp: ast::Operator = {
+    "*" => ast::Operator::Multiplication,
+    "@" => ast::Operator::MatrixMultiplication,
+    "/" => ast::Operator::Division,
+    "%" => ast::Operator::Modulo,
+    "//" => ast::Operator::FloorDivision,
+};
+Term: ast::Expression = BinExpr<MulDivModOp, Factor>;
+
+UnaryOp: ast::UnaryOperator = {
+    "+" => ast::UnaryOperator::Plus,
+    "-" => ast::UnaryOperator::Minus,
+    "~" => ast::UnaryOperator::Invert,
+};
+
+Factor: ast::Expression = {
+    <l:@L> <op:UnaryOp> <f:Factor> <r:@R> => {
+        ast::ExpressionKind::UnaryOp { op, operand: Box::new(f) }.spanned(l, r)
+    },
+    Power,
+};
+
+Power: ast::Expression = <l:@L> <e:AwaitExpr> <f:("**" <Factor>)?> <r:@R> => {
+    match f {
+        Some(factor) => {
+            ast::ExpressionKind::BinOp {
+                left: Box::new(e),
+                op: ast::Operator::Power,
+                right: Box::new(factor),
+            }.spanned(l, r)
+        }
+        _ => e,
+    }
+};
+
+AwaitExpr: ast::Expression = <l:@L> <a:"await"?> <e:AtomExpr> <r:@R> => {
+    if a.is_some() {
+        ast::ExpressionKind::Await { value: Box::new(e) }.spanned(l, r)
+    } else {
+        e
+    }
+};
+
+AtomExpr: ast::Expression = {
+    <l:@L> <e:Atom> "(" <a:ArgList> ")" <r:@R> => ast::ExpressionKind::Call {
+        func: Box::new(e),
+        args: a.0,
+        keywords: a.1,
+    }.spanned(l, r),
+    <l:@L> <e:Atom> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
+        value: Box::new(e),
+        slice: s,
+        ctx: ast::ExprContext::Load,
+    }.spanned(l, r),
+    <l:@L> <e:Atom> "." <n:NAME> <r:@R> => ast::ExpressionKind::Attribute {
+        value: Box::new(e),
+        attr: n,
+        ctx: ast::ExprContext::Load,
+    }.spanned(l, r),
+    Atom,
+};
+
+ArgList: (Vec<ast::Expression>, Vec<ast::Keyword>) = {
+    <v:Comma<Arg>> ","? => {
+        let mut args = vec![];
+        let mut kwargs = vec![];
+        for e in v {
+            match e {
+                (Some(arg), None) => args.push(arg),
+                (None, Some(kw)) => kwargs.push(kw),
+                _ => unreachable!(),
+            }
+        }
+        (args, kwargs)
+    },
+    <GeneratorExp> => (vec![<>], vec![]),
+};
+
+Arg: (Option<ast::Expression>, Option<ast::Keyword>) = {
+    <Test> => { (Some(<>), None) },
+    <n:NAME> "=" <t:Test> => {
+        let kw = ast::Keyword { arg: Some(n), value: Box::new(t) };
+        (None, Some(kw))
+    },
+    <l:@L> "*" <t:Test> <r:@R> => {
+        let arg = ast::ExpressionKind::Starred {
+            value: Box::new(t),
+            ctx: ast::ExprContext::Load,
+        }.spanned(l, r);
+        (Some(arg), None)
+    },
+    "**" <Test> => { (None, Some(ast::Keyword { arg: None, value: Box::new(<>) })) },
+};
+
+SubscriptList: ast::Slice = <t:Subscript> <v:("," <Subscript>)*> <c:","?> => {
+    if !v.is_empty() || c.is_some() {
+        fn slice_index(slice: &ast::Slice) -> Option<&ast::Expression> {
+            match slice {
+                ast::Slice::Index { value } => Some(value),
+                _ => None,
+            }
+        }
+        if slice_index(&t).is_some() {
+            if v.iter().map(slice_index).all(|x| x.is_some()) {
+                let elts = iter::once(slice_index(&t))
+                    .chain(v.iter().map(slice_index))
+                    .map(|x| x.unwrap().clone())
+                    .collect::<Vec<_>>();
+                let tup = ast::Expression {
+                    span: Span::new(elts[0].span.start, elts.last().unwrap().span.end),
+                    kind: ast::ExpressionKind::Tuple {
+                        elts,
+                        ctx: ast::ExprContext::Load,
+                    },
+                };
+                return ast::Slice::Index { value: Box::new(tup) }
+            }
+        }
+        ast::Slice::ExtSlice { dims: iter::once(t).chain(v).collect() }
+    } else {
+        t
+    }
+};
+
+Subscript: ast::Slice = {
+    <Test> => ast::Slice::Index { value: Box::new(<>) },
+    <e1:Test?> ":" <e2:Test?> <e3:(":" <Test?>)?> => {
+        ast::Slice::Slice {
+            lower: e1.map(Box::new),
+            upper: e2.map(Box::new),
+            step: e3.and_then(|x| x).map(Box::new),
+        }
+    },
+};
+
+Atom: ast::Expression = {
+    "(" <e:YieldExpr> ")" => e,
+    "(" <GeneratorExp> ")",
+    "(" <TestListStarExpr> ")",
+    <l:@L> "[" <t:Test> <c:Comprehension+> "]" <r:@R> => {
+        ast::ExpressionKind::ListComp {
+            elt: Box::new(t),
+            generators: c,
+        }.spanned(l, r)
+    },
+    <l:@L> "[" <v:Comma<TestOrStar>?> ","? "]" <r:@R> => ast::ExpressionKind::List {
+        elts: v.unwrap_or_default(),
+        ctx: ast::ExprContext::Load,
+    }.spanned(l, r),
+    <l:@L> "{" <t:Test> <c:Comprehension+> "}" <r:@R> => {
+        ast::ExpressionKind::SetComp {
+            elt: Box::new(t),
+            generators: c,
+        }.spanned(l, r)
+    },
+    <l:@L> "{" <v:Comma<TestOrStar>> ","? "}" <r:@R> => {
+        ast::ExpressionKind::Set { elts: v }.spanned(l, r)
+    },
+    <l:@L> "{" <k:Test> ":" <v:Test> <c:Comprehension+> "}" <r:@R> => {
+        ast::ExpressionKind::DictComp {
+            key: Box::new(k),
+            value: Box::new(v),
+            generators: c,
+        }.spanned(l, r)
+    },
+    <l:@L> "{" <v:Comma<KeyValue>?> ","? "}" <r:@R> => {
+        let (keys, values) = v.unwrap_or_default().into_iter().unzip();
+        ast::ExpressionKind::Dict { keys, values }.spanned(l, r)
+    },
+    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name {
+        id,
+        ctx: ast::ExprContext::Load,
+    }.spanned(l, r),
+    <l:@L> <n:Number> <r:@R> => ast::ExpressionKind::Num { n }.spanned(l, r),
+    // String
+    <l:@L> "..." <r:@R> => ast::ExpressionKind::Ellipsis.spanned(l, r),
+    <l:@L> <c:NameConstant> <r:@R> => ast::ExpressionKind::NameConstant {
+        value: c,
+    }.spanned(l, r),
+};
+
+YieldExpr: ast::Expression = {
+    <l:@L> "yield" "from" <t:Test> <r:@R> => ast::ExpressionKind::YieldFrom {
+        value: Box::new(t),
+    }.spanned(l, r),
+    <l:@L> "yield" <t:TestList?> <r:@R> => ast::ExpressionKind::Yield {
+        value: t.map(Box::new),
+    }.spanned(l, r),
+};
+
+Number: ast::Number = {
+    INTEGER => ast::Number::Integer(<>),
+    FLOAT => ast::Number::Float(<>),
+    IMAGINARY => ast::Number::Complex(<>),
+};
+
+NameConstant: ast::Singleton = {
+    "None" => ast::Singleton::None,
+    "True" => ast::Singleton::True,
+    "False" => ast::Singleton::False,
+};
+
+GeneratorExp: ast::Expression = <l:@L> <t:Test> <c:Comprehension+> <r:@R> => {
+    ast::ExpressionKind::GeneratorExp {
+        elt: Box::new(t),
+        generators: c,
+    }.spanned(l, r)
+};
+
+Comprehension: ast::Comprehension = {
+    <a:"async"?> "for" <e:ExprList> "in" <t:OrTest> <i:("if" <TestNoCond>)*> => {
+        ast::Comprehension {
+            target: Box::new(e),
+            iter: Box::new(t),
+            ifs: i,
+            is_async: a.is_some(),
+        }
+    },
+};
+
+ExprOrStar: ast::Expression = {Expr, StarExpr};
+
+ExprList: ast::Expression = SingleOrTuple<ExprOrStar>;
+
+TestList: ast::Expression = SingleOrTuple<Test>;
+
+TestOrStar: ast::Expression = {Test, StarExpr};
+
+TestListStarExpr: ast::Expression = SingleOrTuple<TestOrStar>;
+
+SingleOrTuple<T>: ast::Expression = {
+    <l:@L> <t:T> <v:("," <T>)*> <c:","?> <r:@R> => {
+        if !v.is_empty() || c.is_some() {
+            let elts = iter::once(t).chain(v).collect();
+            ast::ExpressionKind::Tuple {
+                elts,
+                ctx: ast::ExprContext::Load,
+            }.spanned(l, r)
+        } else {
+            t
+        }
+    }
+};
+
+KeyValue: (Option<ast::Expression>, ast::Expression) = {
+    <k:Test> ":" <v:Test> => (Some(k), v),
+    "**" <Test> => (None, <>),
+};
+
+#[inline]
+Sep<T, S>: Vec<T> =
+    <e:T> <v:(S <T>)*> => iter::once(e).chain(v).collect();
+
+#[inline]
+Comma<T>: Vec<T> = Sep<T, ",">;
+
+extern {
+    type Location = Location;
+    type Error = LexError;
+
+    enum Token {
+        MODULE => Token::Module,
+        INTERACTIVE => Token::Interactive,
+        EVAL => Token::Eval,
+
+        EOF => Token::Eof,
+        NEWLINE => Token::Newline,
+        INDENT => Token::Indent,
+        DEDENT => Token::Dedent,
+        NAME => Token::Name(<String>),
+        INTEGER => Token::Integer(<num_bigint::BigUint>),
+        FLOAT => Token::Float(<f64>),
+        IMAGINARY => Token::Imaginary(<f64>),
+        STRING => Token::String { value: <String>, formatted: <bool> },
+        BYTES => Token::Bytes(<Vec<u8>>),
+
+        "(" => Token::ParenOpen,
+        ")" => Token::ParenClose,
+        "[" => Token::BracketOpen,
+        "]" => Token::BracketClose,
+        "{" => Token::BraceOpen,
+        "}" => Token::BraceClose,
+        ":" => Token::Colon,
+        "," => Token::Comma,
+        ";" => Token::Semi,
+        "+" => Token::Plus,
+        "-" => Token::Minus,
+        "*" => Token::Star,
+        "/" => Token::Slash,
+        "|" => Token::Pipe,
+        "&" => Token::Amper,
+        "<" => Token::Less,
+        ">" => Token::Greater,
+        "=" => Token::Equal,
+        "." => Token::Dot,
+        "%" => Token::Percent,
+        "==" => Token::EqEqual,
+        "!=" => Token::NotEqual,
+        "<=" => Token::LessEqual,
+        ">=" => Token::GreaterEqual,
+        "~" => Token::Tilde,
+        "^" => Token::Caret,
+        "<<" => Token::LeftShift,
+        ">>" => Token::RightShift,
+        "**" => Token::DoubleStar,
+        "+=" => Token::PlusEqual,
+        "-=" => Token::MinEqual,
+        "*=" => Token::StarEqual,
+        "/=" => Token::SlashEqual,
+        "%=" => Token::PercentEqual,
+        "&=" => Token::AmperEqual,
+        "|=" => Token::PipeEqual,
+        "^=" => Token::CaretEqual,
+        "<<=" => Token::LeftShiftEqual,
+        ">>=" => Token::RightShiftEqual,
+        "**=" => Token::DoubleStarEqual,
+        "//" => Token::DoubleSlash,
+        "//=" => Token::DoubleSlashEqual,
+        "@" => Token::At,
+        "@=" => Token::AtEqual,
+        "->" => Token::Rarrow,
+        "..." => Token::Ellipsis,
+
+        "False" => Token::False,
+        "None" => Token::None,
+        "True" => Token::True,
+        "and" => Token::And,
+        "as" => Token::As,
+        "assert" => Token::Assert,
+        "break" => Token::Break,
+        "class" => Token::Class,
+        "continue" => Token::Continue,
+        "def" => Token::Def,
+        "del" => Token::Del,
+        "elif" => Token::Elif,
+        "else" => Token::Else,
+        "except" => Token::Except,
+        "finally" => Token::Finally,
+        "for" => Token::For,
+        "from" => Token::From,
+        "global" => Token::Global,
+        "if" => Token::If,
+        "import" => Token::Import,
+        "in" => Token::In,
+        "is" => Token::Is,
+        "lambda" => Token::Lambda,
+        "nonlocal" => Token::Nonlocal,
+        "not" => Token::Not,
+        "or" => Token::Or,
+        "pass" => Token::Pass,
+        "raise" => Token::Raise,
+        "return" => Token::Return,
+        "try" => Token::Try,
+        "while" => Token::While,
+        "with" => Token::With,
+        "yield" => Token::Yield,
+        "await" => Token::Await,
+        "async" => Token::Async,
+    }
+}

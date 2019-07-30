@@ -334,7 +334,11 @@ impl<'a> Lexer<'a> {
                 } else {
                     value.to_string()
                 };
-                Ok((start, Token::String { value, formatted }, end))
+                if formatted {
+                    Ok((start, Token::FormattedString(value), end))
+                } else {
+                    Ok((start, Token::String(value), end))
+                }
             }
         } else if self.matches(14) {
             // Operator or delimiter
@@ -556,20 +560,14 @@ mod tests {
 
     #[test]
     fn lex_string() {
-        fn str(s: &str) -> Token {
-            Token::String {
-                value: s.to_string(),
-                formatted: false,
-            }
-        }
-        assert_lex!("'foo'", str("foo"));
-        assert_lex!("'foo\\tbar'", str("foo\tbar"));
-        assert_lex!("'\\x'", str("\\x"));
-        assert_lex!("'\\N{SNOWMAN}'", str("☃"));
+        assert_lex!("'foo'", String("foo".into()));
+        assert_lex!("'foo\\tbar'", String("foo\tbar".into()));
+        assert_lex!("'\\x'", String("\\x".into()));
+        assert_lex!("'\\N{SNOWMAN}'", String("☃".into()));
         assert_lex!("b'\\N{SNOWMAN}'", Bytes(b"\\N{SNOWMAN}".to_vec()));
-        assert_lex!("'\\\\\\'\"'", str("\\'\""));
-        assert_lex!("'a \\\nb'", str("a b"));
-        assert_lex!("'''a \nb\\\nc'''", str("a \nbc"));
-        assert_lex!("r'\\t\\\n\\''", str("\\t\\\n\\'"))
+        assert_lex!("'\\\\\\'\"'", String("\\'\"".into()));
+        assert_lex!("'a \\\nb'", String("a b".into()));
+        assert_lex!("'''a \nb\\\nc'''", String("a \nbc".into()));
+        assert_lex!("r'\\t\\\n\\''", String("\\t\\\n\\'".into()))
     }
 }

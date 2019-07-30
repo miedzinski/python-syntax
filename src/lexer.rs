@@ -353,7 +353,7 @@ impl<'a> Lexer<'a> {
             // Identifier
             Ok((start, Token::Name(lex.into()), end))
         } else {
-            unsafe { std::hint::unreachable_unchecked() }
+            unreachable!()
         }
     }
 

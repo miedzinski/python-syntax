@@ -117,7 +117,7 @@ pub enum StatementKind {
         body: Vec<Statement>,
     },
     Raise {
-        exc: Box<Expression>,
+        exc: Option<Box<Expression>>,
         cause: Option<Box<Expression>>,
     },
     Try {
@@ -376,7 +376,7 @@ pub struct Keyword {
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Alias {
     pub identifier: String,
-    pub asname: String,
+    pub asname: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -435,6 +435,135 @@ fn write_escaped(f: &mut fmt::Formatter<'_>, b: u8) -> fmt::Result {
         b'\x0b' => f.write_str("\\v"),
         b if b.is_ascii_graphic() => f.write_str(&char::from(b).to_string()),
         b => write!(f, "\\x{:x}", b),
+    }
+}
+
+impl Display for Program {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Program::Module(p) => write!(f, "{}", p),
+            Program::Interactive(p) => write!(f, "{}", p),
+            Program::Eval(p) => write!(f, "{}", p),
+        }
+    }
+}
+
+impl Display for Module {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_joined(f, &self.body, "\n")
+    }
+}
+
+impl Display for Interactive {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_joined(f, &self.body, "\n")
+    }
+}
+
+impl Display for Eval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.body)
+    }
+}
+
+impl Statement {
+    fn fmt_indented(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
+        for _ in 0..indent * 4 {
+            f.write_str(" ")?;
+        }
+        match &self.kind {
+            StatementKind::FunctionDef { .. } => unimplemented!(),
+            StatementKind::AsyncFunctionDef { .. } => unimplemented!(),
+            StatementKind::ClassDef { .. } => unimplemented!(),
+            StatementKind::Return { value } => match value {
+                Some(v) => write!(f, "return {}", v),
+                _ => write!(f, "return"),
+            },
+            StatementKind::Delete { targets } => {
+                write!(f, "del ")?;
+                write_joined(f, targets, ", ")
+            }
+            StatementKind::Assign { targets, value } => {
+                write_joined(f, targets, " = ")?;
+                write!(f, " = {}", value)
+            }
+            StatementKind::AugAssign { target, op, value } => {
+                write!(f, "{} {}= {}", target, op, value)
+            }
+            StatementKind::AnnAssign {
+                target,
+                annotation,
+                value,
+                ..
+            } => {
+                write!(f, "{}: {}", target, annotation)?;
+                if let Some(value) = value {
+                    write!(f, " = {}", value)?;
+                }
+                Ok(())
+            }
+            StatementKind::For { .. } => unimplemented!(),
+            StatementKind::AsyncFor { .. } => unimplemented!(),
+            StatementKind::While { .. } => unimplemented!(),
+            StatementKind::If { .. } => unimplemented!(),
+            StatementKind::With { .. } => unimplemented!(),
+            StatementKind::AsyncWith { .. } => unimplemented!(),
+            StatementKind::Raise { exc, cause } => {
+                write!(f, "raise")?;
+                if let Some(exc) = exc {
+                    write!(f, " {}", exc)?;
+                }
+                if let Some(cause) = cause {
+                    write!(f, " from {}", cause)?;
+                }
+                Ok(())
+            }
+            StatementKind::Try { .. } => unimplemented!(),
+            StatementKind::Assert { test, msg } => {
+                write!(f, "assert {}", test)?;
+                if let Some(msg) = msg {
+                    write!(f, ", {}", msg)?;
+                }
+                Ok(())
+            }
+            StatementKind::Import { names } => {
+                f.write_str("import ")?;
+                write_joined(f, names, ", ")
+            }
+            StatementKind::ImportFrom {
+                module,
+                names,
+                level,
+            } => {
+                f.write_str("from ")?;
+                for _ in 0..*level {
+                    f.write_str(".")?;
+                }
+                if let Some(module) = module {
+                    write!(f, "{}", module)?;
+                }
+                f.write_str(" import ")?;
+                write_joined(f, names, ", ")
+            }
+            StatementKind::Global { names } => {
+                f.write_str("global ")?;
+                write_joined(f, names, ", ")
+            }
+            StatementKind::Nonlocal { names } => {
+                f.write_str("nonlocal ")?;
+                write_joined(f, names, ", ")
+            }
+            StatementKind::Expr { value } => write!(f, "{}", value),
+            StatementKind::Pass => f.write_str("pass"),
+            StatementKind::Break => f.write_str("break"),
+            StatementKind::Continue => f.write_str("continue"),
+        }
+    }
+}
+
+impl Display for Statement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_indented(f, 0)
     }
 }
 
@@ -708,6 +837,16 @@ impl Display for Keyword {
             Some(arg) => write!(f, "{}={}", arg, self.value),
             _ => write!(f, "**{}", self.value),
         }
+    }
+}
+
+impl Display for Alias {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.identifier)?;
+        if let Some(asname) = &self.asname {
+            write!(f, " as {}", asname)?;
+        }
+        Ok(())
     }
 }
 

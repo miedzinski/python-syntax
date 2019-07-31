@@ -21,7 +21,7 @@ pub Program: ast::Program = {
 };
 
 Module: ast::Module = {
-    NEWLINE* <(<Statement> NEWLINE*)*> => ast::Module {
+    NEWLINE* <(<Statement> NEWLINE*)*> EOF => ast::Module {
         body: <>.into_iter().flatten().collect(),
     },
 };
@@ -119,7 +119,193 @@ Statement: Vec<ast::Statement> = {
 
 SimpleStatement: Vec<ast::Statement> = <Sep<SmallStatement, ";">> ";"? NEWLINE;
 
-SmallStatement: ast::Statement = {};
+SmallStatement: ast::Statement = {
+    ExprStatement,
+    DelStatement,
+    PassStatement,
+    FlowStatement,
+    ImportStatement,
+    GlobalStatement,
+    NonlocalStatement,
+    AssertStatement,
+};
+
+ExprStatement: ast::Statement = {
+    <l:@L> <t:TestListStarExpr> <r:@R> => {
+        ast::StatementKind::Expr { value: Box::new(t) }.spanned(l, r)
+    },
+    <l:@L> <t:TestListStarExpr> ":" <a:Test> <v:("=" <Test>)?> <r:@R> => {
+        let simple = match t {
+            ast::Expression {
+                span: Span { start, .. },
+                kind: ast::ExpressionKind::Name { .. },
+            } if start == l => true,
+            _ => false,
+        };
+        ast::StatementKind::AnnAssign {
+            target: Box::new(t),
+            annotation: Box::new(a),
+            value: v.map(Box::new),
+            simple,
+        }.spanned(l, r)
+    },
+    <l:@L> <t:TestListStarExpr> <op:AugAssign> <v:AssignValue> <r:@R> => {
+        ast::StatementKind::AugAssign {
+            target: Box::new(t),
+            op,
+            value: Box::new(v),
+        }.spanned(l, r)
+    },
+    <l:@L> <t:TestListStarExpr> <v:("=" <AssignValue>)+> <r:@R> => {
+        let (targets, value) = v.split_at(v.len() - 1);
+        ast::StatementKind::Assign {
+            targets: iter::once(t).chain(targets.iter().cloned()).collect(),
+            value: Box::new(value[0].clone()),
+        }.spanned(l, r)
+    },
+};
+
+AugAssign: ast::Operator = {
+    "+=" => ast::Operator::Addition,
+    "-=" => ast::Operator::Subtraction,
+    "*=" => ast::Operator::Multiplication,
+    "@=" => ast::Operator::MatrixMultiplication,
+    "/=" => ast::Operator::Division,
+    "%=" => ast::Operator::Modulo,
+    "**=" => ast::Operator::Power,
+    "<<=" => ast::Operator::LeftShift,
+    ">>=" => ast::Operator::RightShift,
+    "|=" => ast::Operator::BitOr,
+    "^=" => ast::Operator::BitXor,
+    "&=" => ast::Operator::BitAnd,
+    "//=" => ast::Operator::FloorDivision,
+};
+
+AssignValue: ast::Expression = {YieldExpr, TestList};
+
+DelStatement: ast::Statement = {
+    <l:@L> "del" <v:Comma<ExprOrStar>> ","? <r:@R> => {
+        ast::StatementKind::Delete {
+            targets: v,
+        }.spanned(l, r)
+    }
+};
+
+PassStatement: ast::Statement = <l:@L> "pass" <r:@R> => {
+    ast::StatementKind::Pass.spanned(l, r)
+};
+
+FlowStatement: ast::Statement = {
+    BreakStatement,
+    ContinueStatement,
+    ReturnStatement,
+    RaiseStatement,
+    YieldStatement,
+};
+
+BreakStatement: ast::Statement = <l:@L> "break" <r:@R> => {
+    ast::StatementKind::Break.spanned(l, r)
+};
+
+ContinueStatement: ast::Statement = <l:@L> "continue" <r:@R> => {
+    ast::StatementKind::Continue.spanned(l, r)
+};
+
+ReturnStatement: ast::Statement = <l:@L> "return" <t:TestList?> <r:@R> => {
+    ast::StatementKind::Return { value: t.map(Box::new) }.spanned(l, r)
+};
+
+YieldStatement: ast::Statement = <l:@L> <e:YieldExpr> <r:@R> => {
+    ast::StatementKind::Expr { value: Box::new(e) }.spanned(l, r)
+};
+
+RaiseStatement: ast::Statement = {
+    <l:@L> "raise" <e:Test?> <r:@R> => ast::StatementKind::Raise {
+        exc: e.map(Box::new),
+        cause: None,
+    }.spanned(l, r),
+    <l:@L> "raise" <e:Test> "from" <c:Test> <r:@R> => {
+        ast::StatementKind::Raise {
+            exc: Some(Box::new(e)),
+            cause: Some(Box::new(c)),
+        }.spanned(l, r)
+    },
+};
+
+ImportStatement: ast::Statement = {ImportName, ImportFrom};
+
+ImportName: ast::Statement = <l:@L> "import" <v:DottedAsNames> <r:@R> => {
+    ast::StatementKind::Import { names: v }.spanned(l, r)
+};
+
+ImportFrom: ast::Statement = {
+    <l:@L> "from" <m:ImportFromModule> "import" <n:ImportFromNames> <r:@R> => {
+        ast::StatementKind::ImportFrom {
+            module: m.0,
+            names: n,
+            level: m.1,
+        }.spanned(l, r)
+    },
+};
+
+ImportFromModule: (Option<String>, usize) = {
+    <l:ImportFromLevelList?> <d:DottedName> => (Some(d), l.unwrap_or_default()),
+    <ImportFromLevelList> => (None, <>),
+};
+
+ImportFromLevelList: usize = <l:ImportFromLevel+> => l.into_iter().sum();
+
+ImportFromLevel: usize = {
+    "." => 1,
+    "..." => 3,
+};
+
+ImportFromNames: Vec<ast::Alias> = {
+    "*" => vec![ast::Alias { identifier: "*".to_string(), asname: None }],
+    "(" <ImportAsNames> ")",
+    <ImportAsNames>,
+};
+
+ImportAsName: ast::Alias = <a:NAME> <b:("as" <NAME>)?> => {
+    ast::Alias {
+        identifier: a,
+        asname: b,
+    }
+};
+
+DottedAsName: ast::Alias = <d:DottedName> <n:("as" <NAME>)?> => {
+    ast::Alias {
+        identifier: d,
+        asname: n,
+    }
+};
+
+ImportAsNames: Vec<ast::Alias> = <Comma<ImportAsName>> ","?;
+
+DottedAsNames: Vec<ast::Alias> = Comma<DottedAsName>;
+
+DottedName: String = <v:Sep<NAME, ".">> => v.concat();
+
+GlobalStatement: ast::Statement = {
+    <l:@L> "global" <v:Comma<NAME>> <r:@R> => {
+        ast::StatementKind::Global { names: v }.spanned(l, r)
+    },
+};
+
+NonlocalStatement: ast::Statement = {
+    <l:@L> "nonlocal" <v:Comma<NAME>> <r:@R> => {
+        ast::StatementKind::Nonlocal { names: v }.spanned(l, r)
+    },
+};
+
+AssertStatement: ast::Statement = {
+    <l:@L> "assert" <t:Test> <m:("," <Test>)?> <r:@R> => {
+        ast::StatementKind::Assert {
+            test: Box::new(t),
+            msg: m.map(Box::new),
+        }.spanned(l, r)
+    },
+};
 
 CompoundStatement: ast::Statement = {};
 

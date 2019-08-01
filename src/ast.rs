@@ -1,4 +1,7 @@
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    ops::Deref,
+};
 
 use crate::source::{Location, Span, Spanned};
 
@@ -61,7 +64,7 @@ pub enum StatementKind {
     ClassDef {
         name: String,
         bases: Vec<Expression>,
-        keyword: Vec<Keyword>,
+        keywords: Vec<Keyword>,
         body: Vec<Statement>,
         decorator_list: Vec<Expression>,
     },
@@ -338,7 +341,7 @@ pub struct Comprehension {
 #[derive(Debug, Clone)]
 pub struct ExceptHandler {
     pub span: Span,
-    pub typ: Box<Expression>,
+    pub typ: Option<Box<Expression>>,
     pub name: Option<String>,
     pub body: Vec<Statement>,
 }
@@ -438,6 +441,13 @@ fn write_escaped(f: &mut fmt::Formatter<'_>, b: u8) -> fmt::Result {
     }
 }
 
+fn write_indent(f: &mut fmt::Formatter<'_>, level: usize) -> fmt::Result {
+    for _ in 0..level * 4 {
+        f.write_str(" ")?;
+    }
+    Ok(())
+}
+
 impl Display for Program {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -466,15 +476,170 @@ impl Display for Eval {
     }
 }
 
+fn write_body(f: &mut fmt::Formatter<'_>, indent: usize, body: &[Statement]) -> fmt::Result {
+    for e in body {
+        e.fmt_indented(f, indent)?;
+        f.write_str("\n")?;
+    }
+    Ok(())
+}
+
+fn write_funcdef(
+    f: &mut fmt::Formatter<'_>,
+    indent: usize,
+    name: &str,
+    args: &Arguments,
+    body: &[Statement],
+    decorator_list: &[Expression],
+    returns: Option<&Expression>,
+    is_async: bool,
+) -> fmt::Result {
+    for dec in decorator_list {
+        writeln!(f, "@{}", dec)?;
+        write_indent(f, indent)?;
+    }
+    if is_async {
+        f.write_str("async ")?;
+    }
+    write!(f, "def {}({})", name, args)?;
+    if let Some(returns) = returns {
+        write!(f, " -> {}", returns)?;
+    }
+    f.write_str(":\n")?;
+    write_body(f, indent + 1, body)?;
+    Ok(())
+}
+
+fn write_for(
+    f: &mut fmt::Formatter<'_>,
+    indent: usize,
+    target: &Expression,
+    iter: &Expression,
+    body: &[Statement],
+    orelse: &[Statement],
+    is_async: bool,
+) -> fmt::Result {
+    if is_async {
+        f.write_str("async ")?;
+    }
+    writeln!(f, "for {} in {}:", target, iter)?;
+    write_body(f, indent + 1, body)?;
+    if !orelse.is_empty() {
+        write_indent(f, indent)?;
+        f.write_str("else:\n")?;
+        write_body(f, indent + 1, orelse)?;
+    }
+    Ok(())
+}
+
+fn write_if(
+    f: &mut fmt::Formatter<'_>,
+    indent: usize,
+    test: &Expression,
+    body: &[Statement],
+    orelse: &[Statement],
+) -> fmt::Result {
+    writeln!(f, "if {}:", test)?;
+    write_body(f, indent + 1, body)?;
+    match orelse {
+        [Statement {
+            kind: StatementKind::If { test, body, orelse },
+            ..
+        }] => {
+            write_indent(f, indent)?;
+            f.write_str("el")?;
+            write_if(f, indent, test, body, orelse)?;
+        }
+        [] => (),
+        s => {
+            write_indent(f, indent)?;
+            f.write_str("else:\n")?;
+            write_body(f, indent + 1, s)?;
+        }
+    };
+    Ok(())
+}
+
+fn write_with(
+    f: &mut fmt::Formatter<'_>,
+    indent: usize,
+    items: &[WithItem],
+    body: &[Statement],
+    is_async: bool,
+) -> fmt::Result {
+    if is_async {
+        f.write_str("async ")?;
+    }
+    f.write_str("with ")?;
+    write_joined(f, items, ", ")?;
+    f.write_str(":\n")?;
+    write_body(f, indent + 1, body)
+}
+
 impl Statement {
     fn fmt_indented(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
-        for _ in 0..indent * 4 {
-            f.write_str(" ")?;
-        }
+        write_indent(f, indent)?;
         match &self.kind {
-            StatementKind::FunctionDef { .. } => unimplemented!(),
-            StatementKind::AsyncFunctionDef { .. } => unimplemented!(),
-            StatementKind::ClassDef { .. } => unimplemented!(),
+            StatementKind::FunctionDef {
+                name,
+                args,
+                body,
+                decorator_list,
+                returns,
+            } => write_funcdef(
+                f,
+                indent,
+                name,
+                args,
+                body,
+                decorator_list,
+                returns.as_ref().map(Deref::deref),
+                false,
+            ),
+            StatementKind::AsyncFunctionDef {
+                name,
+                args,
+                body,
+                decorator_list,
+                returns,
+            } => write_funcdef(
+                f,
+                indent,
+                name,
+                args,
+                body,
+                decorator_list,
+                returns.as_ref().map(Deref::deref),
+                true,
+            ),
+            StatementKind::ClassDef {
+                name,
+                bases,
+                keywords,
+                body,
+                decorator_list,
+            } => {
+                for dec in decorator_list {
+                    writeln!(f, "@{}", dec)?;
+                    write_indent(f, indent)?;
+                }
+                write!(f, "class {}", name)?;
+                if !bases.is_empty() || !keywords.is_empty() {
+                    f.write_str("(")?;
+                    write_joined(f, bases, ", ")?;
+                    if !bases.is_empty() && !keywords.is_empty() {
+                        f.write_str(", ")?;
+                    }
+                    write_joined(f, keywords, ", ")?;
+                    f.write_str(")")?;
+                }
+                f.write_str(":\n")?;
+                for e in body {
+                    e.fmt_indented(f, indent + 1)?;
+                    f.write_str("\n")?;
+                }
+                Ok(())
+            }
             StatementKind::Return { value } => match value {
                 Some(v) => write!(f, "return {}", v),
                 _ => write!(f, "return"),
@@ -502,12 +667,36 @@ impl Statement {
                 }
                 Ok(())
             }
-            StatementKind::For { .. } => unimplemented!(),
-            StatementKind::AsyncFor { .. } => unimplemented!(),
-            StatementKind::While { .. } => unimplemented!(),
-            StatementKind::If { .. } => unimplemented!(),
-            StatementKind::With { .. } => unimplemented!(),
-            StatementKind::AsyncWith { .. } => unimplemented!(),
+            StatementKind::For {
+                target,
+                iter,
+                body,
+                orelse,
+            } => write_for(f, indent, target, iter, body, orelse, false),
+            StatementKind::AsyncFor {
+                target,
+                iter,
+                body,
+                orelse,
+            } => write_for(f, indent, target, iter, body, orelse, true),
+            StatementKind::While { test, body, orelse } => {
+                writeln!(f, "while {}:", test)?;
+                for e in body {
+                    e.fmt_indented(f, indent + 1)?;
+                }
+                if !orelse.is_empty() {
+                    write_indent(f, indent)?;
+                    f.write_str("else:\n")?;
+                    for e in orelse {
+                        e.fmt_indented(f, indent + 1)?;
+                        f.write_str("\n")?;
+                    }
+                }
+                Ok(())
+            }
+            StatementKind::If { test, body, orelse } => write_if(f, indent, test, body, orelse),
+            StatementKind::With { items, body } => write_with(f, indent, items, body, false),
+            StatementKind::AsyncWith { items, body } => write_with(f, indent, items, body, true),
             StatementKind::Raise { exc, cause } => {
                 write!(f, "raise")?;
                 if let Some(exc) = exc {
@@ -518,7 +707,29 @@ impl Statement {
                 }
                 Ok(())
             }
-            StatementKind::Try { .. } => unimplemented!(),
+            StatementKind::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            } => {
+                f.write_str("try:\n")?;
+                write_body(f, indent + 1, body)?;
+                for hdl in handlers {
+                    hdl.fmt_indented(f, indent)?;
+                }
+                if !orelse.is_empty() {
+                    write_indent(f, indent)?;
+                    f.write_str("else:\n")?;
+                    write_body(f, indent + 1, orelse)?;
+                }
+                if !finalbody.is_empty() {
+                    write_indent(f, indent)?;
+                    f.write_str("finally:\n")?;
+                    write_body(f, indent + 1, finalbody)?;
+                }
+                Ok(())
+            }
             StatementKind::Assert { test, msg } => {
                 write!(f, "assert {}", test)?;
                 if let Some(msg) = msg {
@@ -799,6 +1010,21 @@ impl Display for Comprehension {
     }
 }
 
+impl ExceptHandler {
+    fn fmt_indented(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
+        write_indent(f, indent)?;
+        f.write_str("except")?;
+        if let Some(typ) = &self.typ {
+            write!(f, " {}", typ)?;
+        }
+        if let Some(name) = &self.name {
+            write!(f, " as {}", name)?;
+        }
+        f.write_str(":\n")?;
+        write_body(f, indent + 1, &self.body)
+    }
+}
+
 impl Display for Arguments {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write_joined(
@@ -845,6 +1071,16 @@ impl Display for Alias {
         write!(f, "{}", self.identifier)?;
         if let Some(asname) = &self.asname {
             write!(f, " as {}", asname)?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for WithItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.context_expr)?;
+        if let Some(vars) = &self.optional_vars {
+            write!(f, " as {}", vars)?;
         }
         Ok(())
     }

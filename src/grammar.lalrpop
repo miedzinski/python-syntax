@@ -36,6 +36,81 @@ Eval: ast::Eval = {
     <TestList> NEWLINE* EOF => ast::Eval { body: Box::new(<>) },
 };
 
+Decorator: ast::Expression = {
+    "@" <DecoratorName> NEWLINE,
+    "@" <l:@L> <d:DecoratorName> "(" <a:ArgList> ")" <r:@R> NEWLINE => {
+        ast::ExpressionKind::Call {
+            func: Box::new(d),
+            args: a.0,
+            keywords: a.1,
+        }.spanned(l, r)
+    },
+};
+
+DecoratorName: ast::Expression = {
+    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name { id }.spanned(l, r),
+    <l:@L> <d:DecoratorName> "." <n:NAME> <r:@R> => {
+        ast::ExpressionKind::Attribute {
+            value: Box::new(d),
+            attr: n,
+        }.spanned(l, r)
+    },
+};
+
+Decoratable: ast::Statement = {ClassDef, FuncDef, AsyncFuncDef};
+
+Decorated: ast::Statement = {
+    <l:@L> <v:Decorator+> <s:Decoratable> => {
+        let mut s = s;
+        s.span.start = l;
+        match s.kind {
+            ast::StatementKind::ClassDef { ref mut decorator_list, .. }
+                | ast::StatementKind::FunctionDef { ref mut decorator_list, .. }
+                | ast::StatementKind::AsyncFunctionDef {
+                    ref mut decorator_list, ..
+            } => {
+                *decorator_list = v;
+            }
+            _ => unreachable!(),
+        }
+        s
+    },
+};
+
+AsyncFuncDef: ast::Statement = {
+    <l:@L> "async" <s:FuncDef> <r:@R> => {
+        match s.kind {
+            ast::StatementKind::FunctionDef {
+                name,
+                args,
+                body,
+                decorator_list,
+                returns,
+            } => ast::StatementKind::AsyncFunctionDef {
+                name,
+                args,
+                body,
+                decorator_list,
+                returns
+            }.spanned(l, r),
+            _ => unreachable!(),
+        }
+    },
+};
+
+FuncDef: ast::Statement = {
+    <l:@L> "def" <n:NAME> "(" <v:TypedParamList?> ")" <t:("->" <Test>)?> ":" <s:Suite> <r:@R>
+    => {
+        ast::StatementKind::FunctionDef {
+            name: n,
+            args: v.map(Box::new).unwrap_or_default(),
+            body: s,
+            decorator_list: vec![],
+            returns: t.map(Box::new),
+        }.spanned(l, r)
+    },
+};
+
 TypedParamList = ParamList<TypedParam>;
 UntypedParamList = ParamList<UntypedParam>;
 
@@ -109,7 +184,7 @@ KwParam<P>: ast::Arg = <l:@L> "**" <p:P> <r:@R> => {
     }
 };
  
-TypedParam: (String, Option<ast::Expression>) = <n:NAME> <t:(":" <Test>)> => (n, Some(t));
+TypedParam: (String, Option<ast::Expression>) = <n:NAME> <t:(":" <Test>)?> => (n, t);
 UntypedParam: (String, Option<ast::Expression>) = <NAME> => (<>, None);
 
 Statement: Vec<ast::Statement> = {
@@ -307,7 +382,176 @@ AssertStatement: ast::Statement = {
     },
 };
 
-CompoundStatement: ast::Statement = {};
+CompoundStatement: ast::Statement = {
+    IfStatement,
+    WhileStatement,
+    ForStatement,
+    TryStatement,
+    WithStatement,
+    FuncDef,
+    ClassDef,
+    Decorated,
+    AsyncStatement,
+};
+
+AsyncStatement: ast::Statement = {
+    AsyncFuncDef,
+    <l:@L> "async" <s:WithStatement> <r:@R> => {
+        match s.kind {
+            ast::StatementKind::With { items, body } => {
+                ast::StatementKind::AsyncWith {
+                    items,
+                    body,
+                }.spanned(l, r)
+            }
+            _ => unreachable!(),
+        }
+    },
+    <l:@L> "async" <s:ForStatement> <r:@R> => {
+        match s.kind {
+            ast::StatementKind::For { target, iter, body, orelse } => {
+                ast::StatementKind::AsyncFor {
+                    target,
+                    iter,
+                    body,
+                    orelse,
+                }.spanned(l, r)
+            }
+            _ => unreachable!(),
+        }
+    },
+};
+
+IfStatement: ast::Statement = {
+    <l:@L> "if" <t:Test> ":" <s:Suite> <e:ElseStatement?> <r:@R> => {
+        ast::StatementKind::If {
+            test: Box::new(t),
+            body: s,
+            orelse: e.unwrap_or_default(),
+        }.spanned(l, r)
+    }
+};
+
+ElseStatement: Vec<ast::Statement> = {
+    <l:@L> "elif" <t:Test> ":" <s:Suite> <e:ElseStatement?> <r:@R> => {
+        vec![ast::StatementKind::If {
+            test: Box::new(t),
+            body: s,
+            orelse: e.unwrap_or_default(),
+        }.spanned(l, r)]
+    },
+    "else" ":" <Suite>,
+};
+
+WhileStatement: ast::Statement = {
+    <l:@L> "while" <t:Test> ":" <b:Suite> <e:("else" ":" <Suite>)?> <r:@R> => {
+        ast::StatementKind::While {
+            test: Box::new(t),
+            body: b,
+            orelse: e.unwrap_or_default(),
+        }.spanned(l, r)
+    },
+};
+
+ForStatement: ast::Statement = {
+    <l:@L> "for" <t:ExprList> "in" <i:TestList> ":" <b:Suite> <e:("else" <Suite>)?> <r:@R>
+    => {
+        ast::StatementKind::For {
+            target: Box::new(t),
+            iter: Box::new(i),
+            body: b,
+            orelse: e.unwrap_or_default(),
+        }.spanned(l, r)
+    },
+};
+
+TryStatement: ast::Statement = {
+    <l:@L> "try" ":" <b:Suite> <c:ExceptClauseList>
+        <e:("else" ":" <Suite>)?> <f:("finally" ":" <Suite>)?> <r:@R>
+    => {
+        ast::StatementKind::Try {
+            body: b,
+            handlers: c,
+            orelse: e.unwrap_or_default(),
+            finalbody: f.unwrap_or_default(),
+        }.spanned(l, r)
+    },
+    <l:@L> "try" ":" <b:Suite> "finally" <f:Suite> <r:@R> => {
+        ast::StatementKind::Try {
+            body: b,
+            handlers: vec![],
+            orelse: vec![],
+            finalbody: f,
+        }.spanned(l, r)
+    },
+};
+
+ExceptClauseList: Vec<ast::ExceptHandler> = {
+    <v:TypedExceptClause+> <c:DefaultExceptClause?> => {
+        let mut v = v;
+        if let Some(c) = c {
+            v.push(c);
+        }
+        v
+    },
+    <DefaultExceptClause> => vec![<>],
+};
+
+TypedExceptClause: ast::ExceptHandler = {
+    <l:@L> "except" <t:Test> <n:("as" <NAME>)?> ":" <s:Suite> <r:@R> => {
+        ast::ExceptHandler {
+            span: Span::new(l, r),
+            typ: Some(Box::new(t)),
+            name: n,
+            body: s,
+        }
+    },
+};
+
+DefaultExceptClause: ast::ExceptHandler = {
+    <l:@L> "except" ":" <s:Suite> <r:@R> => {
+        ast::ExceptHandler {
+            span: Span::new(l, r),
+            typ: None,
+            name: None,
+            body: s,
+        }
+    }
+};
+
+WithStatement: ast::Statement = {
+    <l:@L> "with" <v:Comma<WithItem>> ":" <s:Suite> <r:@R> => {
+        ast::StatementKind::With {
+            items: v,
+            body: s,
+        }.spanned(l, r)
+    },
+};
+
+WithItem: ast::WithItem = <t:Test> <e:("as" <Expr>)?> => {
+    ast::WithItem {
+        context_expr: Box::new(t),
+        optional_vars: e.map(Box::new),
+    }
+};
+
+ClassDef: ast::Statement = {
+    <l:@L> "class" <n:NAME> <a:("(" <ArgList> ")")?> ":" <s:Suite> <r:@R> => {
+        let (bases, keywords) = a.unwrap_or_default();
+        ast::StatementKind::ClassDef {
+            name: n,
+            bases,
+            keywords,
+            body: s,
+            decorator_list: vec![],
+        }.spanned(l, r)
+    },
+};
+
+Suite: Vec<ast::Statement> = {
+    SimpleStatement,
+    NEWLINE INDENT <v:Statement+> DEDENT => v.concat(),
+};
 
 Test: ast::Expression = {Cond, OrTest, Lambda<Test>};
 

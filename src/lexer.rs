@@ -1,5 +1,8 @@
-use std::collections::HashMap;
-use std::convert::TryInto;
+use std::{
+    collections::HashMap,
+    convert::TryInto,
+    fmt::{self, Display},
+};
 
 use num_bigint::BigUint;
 use regex::{CaptureLocations, Regex};
@@ -33,6 +36,37 @@ pub enum LexErrorKind {
     NonAsciiBytes { offset: usize },
     UnicodeDecode { offset: usize },
     UnterminatedString,
+}
+
+impl Display for LexError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
+impl Display for LexErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LexErrorKind::UnexpectedCharacter(c) => {
+                write!(f, "unexpected character {}", c)
+            }
+            LexErrorKind::UnmatchedDedent => {
+                write!(f, "unmatched indentation")
+            }
+            LexErrorKind::MixedTabsAndSpaces => {
+                write!(f, "inconsistent use of tabs and spaces")
+            }
+            LexErrorKind::NonAsciiBytes { .. } => {
+                write!(f, "bytes can only contains ASCII characters")
+            }
+            LexErrorKind::UnicodeDecode { .. } => {
+                write!(f, "malformed unicode escape")
+            },
+            LexErrorKind::UnterminatedString => {
+                write!(f, "unterminated string")
+            },
+        }
+    }
 }
 
 struct ParseStringError {

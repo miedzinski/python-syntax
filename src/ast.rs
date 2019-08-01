@@ -484,6 +484,7 @@ fn write_body(f: &mut fmt::Formatter<'_>, indent: usize, body: &[Statement]) -> 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_funcdef(
     f: &mut fmt::Formatter<'_>,
     indent: usize,

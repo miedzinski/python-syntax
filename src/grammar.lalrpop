@@ -709,16 +709,16 @@ AwaitExpr: ast::Expression = <l:@L> <a:"await"?> <e:AtomExpr> <r:@R> => {
 };
 
 AtomExpr: ast::Expression = {
-    <l:@L> <e:Atom> "(" <a:ArgList> ")" <r:@R> => ast::ExpressionKind::Call {
+    <l:@L> <e:AtomExpr> "(" <a:ArgList> ")" <r:@R> => ast::ExpressionKind::Call {
         func: Box::new(e),
         args: a.0,
         keywords: a.1,
     }.spanned(l, r),
-    <l:@L> <e:Atom> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
+    <l:@L> <e:AtomExpr> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
         value: Box::new(e),
         slice: s,
     }.spanned(l, r),
-    <l:@L> <e:Atom> "." <n:NAME> <r:@R> => ast::ExpressionKind::Attribute {
+    <l:@L> <e:AtomExpr> "." <n:NAME> <r:@R> => ast::ExpressionKind::Attribute {
         value: Box::new(e),
         attr: n,
     }.spanned(l, r),

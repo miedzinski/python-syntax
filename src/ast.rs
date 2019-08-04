@@ -427,6 +427,7 @@ where
 
 fn write_escaped(f: &mut fmt::Formatter<'_>, b: u8) -> fmt::Result {
     match b {
+        b' ' => f.write_str(" "),
         b'"' => f.write_str("\\\""),
         b'\\' => f.write_str("\\"),
         b'\n' => f.write_str("\\n"),

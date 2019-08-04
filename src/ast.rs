@@ -636,11 +636,7 @@ impl Statement {
                     f.write_str(")")?;
                 }
                 f.write_str(":\n")?;
-                for e in body {
-                    e.fmt_indented(f, indent + 1)?;
-                    f.write_str("\n")?;
-                }
-                Ok(())
+                write_body(f, indent + 1, body)
             }
             StatementKind::Return { value } => match value {
                 Some(v) => write!(f, "return {}", v),
@@ -683,16 +679,11 @@ impl Statement {
             } => write_for(f, indent, target, iter, body, orelse, true),
             StatementKind::While { test, body, orelse } => {
                 writeln!(f, "while {}:", test)?;
-                for e in body {
-                    e.fmt_indented(f, indent + 1)?;
-                }
+                write_body(f, indent + 1, body)?;
                 if !orelse.is_empty() {
                     write_indent(f, indent)?;
                     f.write_str("else:\n")?;
-                    for e in orelse {
-                        e.fmt_indented(f, indent + 1)?;
-                        f.write_str("\n")?;
-                    }
+                    write_body(f, indent + 1, orelse)?;
                 }
                 Ok(())
             }

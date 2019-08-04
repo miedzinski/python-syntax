@@ -455,7 +455,8 @@ WhileStatement: ast::Statement = {
 };
 
 ForStatement: ast::Statement = {
-    <l:@L> "for" <t:ExprList> "in" <i:TestList> ":" <b:Suite> <e:("else" <Suite>)?> <r:@R>
+    <l:@L> "for" <t:ExprList> "in" <i:TestList> ":" <b:Suite>
+        <e:("else" ":" <Suite>)?> <r:@R>
     => {
         ast::StatementKind::For {
             target: Box::new(t),

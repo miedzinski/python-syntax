@@ -38,11 +38,12 @@ Eval: ast::Eval = {
 
 Decorator: ast::Expression = {
     "@" <DecoratorName> NEWLINE,
-    "@" <l:@L> <d:DecoratorName> "(" <a:ArgList> ")" <r:@R> NEWLINE => {
+    "@" <l:@L> <d:DecoratorName> "(" <a:ArgList?> ")" <r:@R> NEWLINE => {
+        let (args, keywords) = a.unwrap_or_default();
         ast::ExpressionKind::Call {
             func: Box::new(d),
-            args: a.0,
-            keywords: a.1,
+            args,
+            keywords,
         }.spanned(l, r)
     },
 };
@@ -709,11 +710,14 @@ AwaitExpr: ast::Expression = <l:@L> <a:"await"?> <e:AtomExpr> <r:@R> => {
 };
 
 AtomExpr: ast::Expression = {
-    <l:@L> <e:AtomExpr> "(" <a:ArgList> ")" <r:@R> => ast::ExpressionKind::Call {
-        func: Box::new(e),
-        args: a.0,
-        keywords: a.1,
-    }.spanned(l, r),
+    <l:@L> <e:AtomExpr> "(" <a:ArgList?> ")" <r:@R> => {
+        let (args, keywords) = a.unwrap_or_default();
+        ast::ExpressionKind::Call {
+            func: Box::new(e),
+            args,
+            keywords,
+        }.spanned(l, r)
+    },
     <l:@L> <e:AtomExpr> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
         value: Box::new(e),
         slice: s,

@@ -478,7 +478,7 @@ TryStatement: ast::Statement = {
             finalbody: f.unwrap_or_default(),
         }.spanned(l, r)
     },
-    <l:@L> "try" ":" <b:Suite> "finally" <f:Suite> <r:@R> => {
+    <l:@L> "try" ":" <b:Suite> "finally" ":" <f:Suite> <r:@R> => {
         ast::StatementKind::Try {
             body: b,
             handlers: vec![],

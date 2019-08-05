@@ -21,9 +21,3 @@ impl Span {
         Span { start, end }
     }
 }
-
-#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
-pub struct Spanned<T> {
-    pub span: Span,
-    pub kind: T,
-}

@@ -1,9 +1,6 @@
-use std::{
-    fmt::{self, Display},
-    ops::Deref,
-};
+use std::fmt::{self, Display};
 
-use crate::source::{Location, Span, Spanned};
+use crate::source::Span;
 
 #[derive(Debug, Clone)]
 pub enum Program {
@@ -27,247 +24,493 @@ pub struct Eval {
     pub body: Box<Expression>,
 }
 
-macro_rules! impl_spanned {
-    ($t:ty) => {
-        impl $t {
-            #[allow(dead_code)]
-            pub(crate) fn spanned(self, start: Location, end: Location) -> Spanned<$t> {
-                Spanned {
-                    span: Span::new(start, end),
-                    kind: self,
-                }
-            }
+#[derive(Debug, Clone)]
+pub struct FunctionDef {
+    pub span: Span,
+    pub name: String,
+    pub args: Box<Arguments>,
+    pub body: Vec<Statement>,
+    pub decorator_list: Vec<Expression>,
+    pub returns: Option<Box<Expression>>,
+}
+
+pub type AsyncFunctionDef = FunctionDef;
+
+#[derive(Debug, Clone)]
+pub struct ClassDef {
+    pub span: Span,
+    pub name: String,
+    pub bases: Vec<Expression>,
+    pub keywords: Vec<Keyword>,
+    pub body: Vec<Statement>,
+    pub decorator_list: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Return {
+    pub span: Span,
+    pub value: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Delete {
+    pub span: Span,
+    pub targets: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Assign {
+    pub span: Span,
+    pub targets: Vec<Expression>,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AugAssign {
+    pub span: Span,
+    pub target: Box<Expression>,
+    pub op: OpKind,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnnAssign {
+    pub span: Span,
+    pub target: Box<Expression>,
+    pub annotation: Box<Expression>,
+    pub value: Option<Box<Expression>>,
+    pub simple: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct For {
+    pub span: Span,
+    pub target: Box<Expression>,
+    pub iter: Box<Expression>,
+    pub body: Vec<Statement>,
+    pub orelse: Vec<Statement>,
+}
+
+pub type AsyncFor = For;
+
+#[derive(Debug, Clone)]
+pub struct While {
+    pub span: Span,
+    pub test: Box<Expression>,
+    pub body: Vec<Statement>,
+    pub orelse: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct If {
+    pub span: Span,
+    pub test: Box<Expression>,
+    pub body: Vec<Statement>,
+    pub orelse: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct With {
+    pub span: Span,
+    pub items: Vec<WithItem>,
+    pub body: Vec<Statement>,
+}
+
+pub type AsyncWith = With;
+
+#[derive(Debug, Clone)]
+pub struct Raise {
+    pub span: Span,
+    pub exc: Option<Box<Expression>>,
+    pub cause: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Try {
+    pub span: Span,
+    pub body: Vec<Statement>,
+    pub handlers: Vec<ExceptHandler>,
+    pub orelse: Vec<Statement>,
+    pub finalbody: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Assert {
+    pub span: Span,
+    pub test: Box<Expression>,
+    pub msg: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub span: Span,
+    pub names: Vec<Alias>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportFrom {
+    pub span: Span,
+    pub module: Option<String>,
+    pub names: Vec<Alias>,
+    pub level: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct Global {
+    pub span: Span,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Nonlocal {
+    pub span: Span,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Expr {
+    pub span: Span,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Pass {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct Break {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct Continue {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum Statement {
+    FunctionDef(FunctionDef),
+    AsyncFunctionDef(AsyncFunctionDef),
+    ClassDef(ClassDef),
+    Return(Return),
+    Delete(Delete),
+    Assign(Assign),
+    AugAssign(AugAssign),
+    AnnAssign(AnnAssign),
+    For(For),
+    AsyncFor(AsyncFor),
+    While(While),
+    If(If),
+    With(With),
+    AsyncWith(AsyncWith),
+    Raise(Raise),
+    Try(Try),
+    Assert(Assert),
+    Import(Import),
+    ImportFrom(ImportFrom),
+    Global(Global),
+    Nonlocal(Nonlocal),
+    Expr(Expr),
+    Pass(Pass),
+    Break(Break),
+    Continue(Continue),
+}
+
+impl Statement {
+    pub fn span(&self) -> &Span {
+        match self {
+            Statement::FunctionDef(x) => &x.span,
+            Statement::AsyncFunctionDef(x) => &x.span,
+            Statement::ClassDef(x) => &x.span,
+            Statement::Return(x) => &x.span,
+            Statement::Delete(x) => &x.span,
+            Statement::Assign(x) => &x.span,
+            Statement::AugAssign(x) => &x.span,
+            Statement::AnnAssign(x) => &x.span,
+            Statement::For(x) => &x.span,
+            Statement::AsyncFor(x) => &x.span,
+            Statement::While(x) => &x.span,
+            Statement::If(x) => &x.span,
+            Statement::With(x) => &x.span,
+            Statement::AsyncWith(x) => &x.span,
+            Statement::Raise(x) => &x.span,
+            Statement::Try(x) => &x.span,
+            Statement::Assert(x) => &x.span,
+            Statement::Import(x) => &x.span,
+            Statement::ImportFrom(x) => &x.span,
+            Statement::Global(x) => &x.span,
+            Statement::Nonlocal(x) => &x.span,
+            Statement::Expr(x) => &x.span,
+            Statement::Pass(x) => &x.span,
+            Statement::Break(x) => &x.span,
+            Statement::Continue(x) => &x.span,
         }
-    };
+    }
 }
 
-pub type Statement = Spanned<StatementKind>;
-
-impl_spanned!(StatementKind);
-
 #[derive(Debug, Clone)]
-pub enum StatementKind {
-    FunctionDef {
-        name: String,
-        args: Box<Arguments>,
-        body: Vec<Statement>,
-        decorator_list: Vec<Expression>,
-        returns: Option<Box<Expression>>,
-    },
-    AsyncFunctionDef {
-        name: String,
-        args: Box<Arguments>,
-        body: Vec<Statement>,
-        decorator_list: Vec<Expression>,
-        returns: Option<Box<Expression>>,
-    },
-    ClassDef {
-        name: String,
-        bases: Vec<Expression>,
-        keywords: Vec<Keyword>,
-        body: Vec<Statement>,
-        decorator_list: Vec<Expression>,
-    },
-    Return {
-        value: Option<Box<Expression>>,
-    },
-    Delete {
-        targets: Vec<Expression>,
-    },
-    Assign {
-        targets: Vec<Expression>,
-        value: Box<Expression>,
-    },
-    AugAssign {
-        target: Box<Expression>,
-        op: Operator,
-        value: Box<Expression>,
-    },
-    AnnAssign {
-        target: Box<Expression>,
-        annotation: Box<Expression>,
-        value: Option<Box<Expression>>,
-        simple: bool,
-    },
-    For {
-        target: Box<Expression>,
-        iter: Box<Expression>,
-        body: Vec<Statement>,
-        orelse: Vec<Statement>,
-    },
-    AsyncFor {
-        target: Box<Expression>,
-        iter: Box<Expression>,
-        body: Vec<Statement>,
-        orelse: Vec<Statement>,
-    },
-    While {
-        test: Box<Expression>,
-        body: Vec<Statement>,
-        orelse: Vec<Statement>,
-    },
-    If {
-        test: Box<Expression>,
-        body: Vec<Statement>,
-        orelse: Vec<Statement>,
-    },
-    With {
-        items: Vec<WithItem>,
-        body: Vec<Statement>,
-    },
-    AsyncWith {
-        items: Vec<WithItem>,
-        body: Vec<Statement>,
-    },
-    Raise {
-        exc: Option<Box<Expression>>,
-        cause: Option<Box<Expression>>,
-    },
-    Try {
-        body: Vec<Statement>,
-        handlers: Vec<ExceptHandler>,
-        orelse: Vec<Statement>,
-        finalbody: Vec<Statement>,
-    },
-    Assert {
-        test: Box<Expression>,
-        msg: Option<Box<Expression>>,
-    },
-    Import {
-        names: Vec<Alias>,
-    },
-    ImportFrom {
-        module: Option<String>,
-        names: Vec<Alias>,
-        level: usize,
-    },
-    Global {
-        names: Vec<String>,
-    },
-    Nonlocal {
-        names: Vec<String>,
-    },
-    Expr {
-        value: Box<Expression>,
-    },
-    Pass,
-    Break,
-    Continue,
+pub struct BoolOp {
+    pub span: Span,
+    pub left: Box<Expression>,
+    pub op: BoolOpKind,
+    pub right: Box<Expression>,
 }
 
-pub type Expression = Spanned<ExpressionKind>;
-
-impl_spanned!(ExpressionKind);
+#[derive(Debug, Clone)]
+pub struct BinOp {
+    pub span: Span,
+    pub left: Box<Expression>,
+    pub op: OpKind,
+    pub right: Box<Expression>,
+}
 
 #[derive(Debug, Clone)]
-pub enum ExpressionKind {
-    BoolOp {
-        left: Box<Expression>,
-        op: BooleanOperator,
-        right: Box<Expression>,
-    },
-    BinOp {
-        left: Box<Expression>,
-        op: Operator,
-        right: Box<Expression>,
-    },
-    UnaryOp {
-        op: UnaryOperator,
-        operand: Box<Expression>,
-    },
-    Lambda {
-        args: Box<Arguments>,
-        body: Box<Expression>,
-    },
-    IfExp {
-        test: Box<Expression>,
-        body: Box<Expression>,
-        orelse: Box<Expression>,
-    },
-    Dict {
-        keys: Vec<Option<Expression>>,
-        values: Vec<Expression>,
-    },
-    Set {
-        elts: Vec<Expression>,
-    },
-    ListComp {
-        elt: Box<Expression>,
-        generators: Vec<Comprehension>,
-    },
-    SetComp {
-        elt: Box<Expression>,
-        generators: Vec<Comprehension>,
-    },
-    DictComp {
-        key: Box<Expression>,
-        value: Box<Expression>,
-        generators: Vec<Comprehension>,
-    },
-    GeneratorExp {
-        elt: Box<Expression>,
-        generators: Vec<Comprehension>,
-    },
-    Await {
-        value: Box<Expression>,
-    },
-    Yield {
-        value: Option<Box<Expression>>,
-    },
-    YieldFrom {
-        value: Box<Expression>,
-    },
-    Compare {
-        left: Box<Expression>,
-        ops: Vec<ComparisonOperator>,
-        comparators: Vec<Expression>,
-    },
-    Call {
-        func: Box<Expression>,
-        args: Vec<Expression>,
-        keywords: Vec<Keyword>,
-    },
-    Num {
-        n: Number,
-    },
-    Str {
-        s: String,
-    },
-    FormattedValue {
-        value: Box<Expression>,
-        conversion: Option<Conversion>,
-        format_spec: Box<Expression>,
-    },
-    JoinedStr {
-        values: Vec<Expression>,
-    },
-    Bytes {
-        s: Vec<u8>,
-    },
-    NameConstant {
-        value: Singleton,
-    },
-    Ellipsis,
-    Attribute {
-        value: Box<Expression>,
-        attr: String,
-    },
-    Subscript {
-        value: Box<Expression>,
-        slice: Slice,
-    },
-    Starred {
-        value: Box<Expression>,
-    },
-    Name {
-        id: String,
-    },
-    List {
-        elts: Vec<Expression>,
-    },
-    Tuple {
-        elts: Vec<Expression>,
-    },
+pub struct UnaryOp {
+    pub span: Span,
+    pub op: UnaryOpKind,
+    pub operand: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Lambda {
+    pub span: Span,
+    pub args: Box<Arguments>,
+    pub body: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IfExp {
+    pub span: Span,
+    pub test: Box<Expression>,
+    pub body: Box<Expression>,
+    pub orelse: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Dict {
+    pub span: Span,
+    pub keys: Vec<Option<Expression>>,
+    pub values: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Set {
+    pub span: Span,
+    pub elts: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListComp {
+    pub span: Span,
+    pub elt: Box<Expression>,
+    pub generators: Vec<Comprehension>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetComp {
+    pub span: Span,
+    pub elt: Box<Expression>,
+    pub generators: Vec<Comprehension>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DictComp {
+    pub span: Span,
+    pub key: Box<Expression>,
+    pub value: Box<Expression>,
+    pub generators: Vec<Comprehension>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GeneratorExp {
+    pub span: Span,
+    pub elt: Box<Expression>,
+    pub generators: Vec<Comprehension>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Await {
+    pub span: Span,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Yield {
+    pub span: Span,
+    pub value: Option<Box<Expression>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct YieldFrom {
+    pub span: Span,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Compare {
+    pub span: Span,
+    pub left: Box<Expression>,
+    pub ops: Vec<ComparisonOpKind>,
+    pub comparators: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Call {
+    pub span: Span,
+    pub func: Box<Expression>,
+    pub args: Vec<Expression>,
+    pub keywords: Vec<Keyword>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Num {
+    pub span: Span,
+    pub value: NumKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct Str {
+    pub span: Span,
+    pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FormattedValue {
+    pub span: Span,
+    pub value: Box<Expression>,
+    pub conversion: Option<Conversion>,
+    pub format_spec: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JoinedStr {
+    pub span: Span,
+    pub values: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Bytes {
+    pub span: Span,
+    pub value: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NameConstant {
+    pub span: Span,
+    pub value: Singleton,
+}
+
+#[derive(Debug, Clone)]
+pub struct Ellipsis {
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub struct Attribute {
+    pub span: Span,
+    pub value: Box<Expression>,
+    pub attr: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Subscript {
+    pub span: Span,
+    pub value: Box<Expression>,
+    pub slice: Slice,
+}
+
+#[derive(Debug, Clone)]
+pub struct Starred {
+    pub span: Span,
+    pub value: Box<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Name {
+    pub span: Span,
+    pub id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct List {
+    pub span: Span,
+    pub elts: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Tuple {
+    pub span: Span,
+    pub elts: Vec<Expression>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Expression {
+    BoolOp(BoolOp),
+    BinOp(BinOp),
+    UnaryOp(UnaryOp),
+    Lambda(Lambda),
+    IfExp(IfExp),
+    Dict(Dict),
+    Set(Set),
+    ListComp(ListComp),
+    SetComp(SetComp),
+    DictComp(DictComp),
+    GeneratorExp(GeneratorExp),
+    Await(Await),
+    Yield(Yield),
+    YieldFrom(YieldFrom),
+    Compare(Compare),
+    Call(Call),
+    Num(Num),
+    Str(Str),
+    FormattedValue(FormattedValue),
+    JoinedStr(JoinedStr),
+    Bytes(Bytes),
+    NameConstant(NameConstant),
+    Ellipsis(Ellipsis),
+    Attribute(Attribute),
+    Subscript(Subscript),
+    Starred(Starred),
+    Name(Name),
+    List(List),
+    Tuple(Tuple),
+}
+
+impl Expression {
+    pub fn span(&self) -> &Span {
+        match self {
+            Expression::BoolOp(x) => &x.span,
+            Expression::BinOp(x) => &x.span,
+            Expression::UnaryOp(x) => &x.span,
+            Expression::Lambda(x) => &x.span,
+            Expression::IfExp(x) => &x.span,
+            Expression::Dict(x) => &x.span,
+            Expression::Set(x) => &x.span,
+            Expression::ListComp(x) => &x.span,
+            Expression::SetComp(x) => &x.span,
+            Expression::DictComp(x) => &x.span,
+            Expression::GeneratorExp(x) => &x.span,
+            Expression::Await(x) => &x.span,
+            Expression::Yield(x) => &x.span,
+            Expression::YieldFrom(x) => &x.span,
+            Expression::Compare(x) => &x.span,
+            Expression::Call(x) => &x.span,
+            Expression::Num(x) => &x.span,
+            Expression::Str(x) => &x.span,
+            Expression::FormattedValue(x) => &x.span,
+            Expression::JoinedStr(x) => &x.span,
+            Expression::Bytes(x) => &x.span,
+            Expression::NameConstant(x) => &x.span,
+            Expression::Ellipsis(x) => &x.span,
+            Expression::Attribute(x) => &x.span,
+            Expression::Subscript(x) => &x.span,
+            Expression::Starred(x) => &x.span,
+            Expression::Name(x) => &x.span,
+            Expression::List(x) => &x.span,
+            Expression::Tuple(x) => &x.span,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -286,13 +529,13 @@ pub enum Slice {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum BooleanOperator {
+pub enum BoolOpKind {
     And,
     Or,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum Operator {
+pub enum OpKind {
     Addition,
     Subtraction,
     Multiplication,
@@ -309,7 +552,7 @@ pub enum Operator {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum UnaryOperator {
+pub enum UnaryOpKind {
     Invert,
     Not,
     Plus,
@@ -317,7 +560,7 @@ pub enum UnaryOperator {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum ComparisonOperator {
+pub enum ComparisonOpKind {
     Equal,
     NotEqual,
     Less,
@@ -396,7 +639,7 @@ pub enum Singleton {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Number {
+pub enum NumKind {
     Integer(num_bigint::BigUint),
     Float(f64),
     Complex(f64),
@@ -485,72 +728,50 @@ fn write_body(f: &mut fmt::Formatter<'_>, indent: usize, body: &[Statement]) -> 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_funcdef(
     f: &mut fmt::Formatter<'_>,
     indent: usize,
-    name: &str,
-    args: &Arguments,
-    body: &[Statement],
-    decorator_list: &[Expression],
-    returns: Option<&Expression>,
+    node: &FunctionDef,
     is_async: bool,
 ) -> fmt::Result {
-    for dec in decorator_list {
+    for dec in &node.decorator_list {
         writeln!(f, "@{}", dec)?;
         write_indent(f, indent)?;
     }
     if is_async {
         f.write_str("async ")?;
     }
-    write!(f, "def {}({})", name, args)?;
-    if let Some(returns) = returns {
+    write!(f, "def {}({})", node.name, node.args)?;
+    if let Some(returns) = &node.returns {
         write!(f, " -> {}", returns)?;
     }
     f.write_str(":\n")?;
-    write_body(f, indent + 1, body)?;
+    write_body(f, indent + 1, &node.body)?;
     Ok(())
 }
 
-fn write_for(
-    f: &mut fmt::Formatter<'_>,
-    indent: usize,
-    target: &Expression,
-    iter: &Expression,
-    body: &[Statement],
-    orelse: &[Statement],
-    is_async: bool,
-) -> fmt::Result {
+fn write_for(f: &mut fmt::Formatter<'_>, indent: usize, node: &For, is_async: bool) -> fmt::Result {
     if is_async {
         f.write_str("async ")?;
     }
-    writeln!(f, "for {} in {}:", target, iter)?;
-    write_body(f, indent + 1, body)?;
-    if !orelse.is_empty() {
+    writeln!(f, "for {} in {}:", node.target, node.iter)?;
+    write_body(f, indent + 1, &node.body)?;
+    if !node.orelse.is_empty() {
         write_indent(f, indent)?;
         f.write_str("else:\n")?;
-        write_body(f, indent + 1, orelse)?;
+        write_body(f, indent + 1, &node.orelse)?;
     }
     Ok(())
 }
 
-fn write_if(
-    f: &mut fmt::Formatter<'_>,
-    indent: usize,
-    test: &Expression,
-    body: &[Statement],
-    orelse: &[Statement],
-) -> fmt::Result {
-    writeln!(f, "if {}:", test)?;
-    write_body(f, indent + 1, body)?;
-    match orelse {
-        [Statement {
-            kind: StatementKind::If { test, body, orelse },
-            ..
-        }] => {
+fn write_if(f: &mut fmt::Formatter<'_>, indent: usize, node: &If) -> fmt::Result {
+    writeln!(f, "if {}:", node.test)?;
+    write_body(f, indent + 1, &node.body)?;
+    match node.orelse.as_slice() {
+        [Statement::If(s)] => {
             write_indent(f, indent)?;
             f.write_str("el")?;
-            write_if(f, indent, test, body, orelse)?;
+            write_if(f, indent, s)?;
         }
         [] => (),
         s => {
@@ -565,132 +786,80 @@ fn write_if(
 fn write_with(
     f: &mut fmt::Formatter<'_>,
     indent: usize,
-    items: &[WithItem],
-    body: &[Statement],
+    node: &With,
     is_async: bool,
 ) -> fmt::Result {
     if is_async {
         f.write_str("async ")?;
     }
     f.write_str("with ")?;
-    write_joined(f, items, ", ")?;
+    write_joined(f, &node.items, ", ")?;
     f.write_str(":\n")?;
-    write_body(f, indent + 1, body)
+    write_body(f, indent + 1, &node.body)
 }
 
 impl Statement {
     fn fmt_indented(&self, f: &mut fmt::Formatter<'_>, indent: usize) -> fmt::Result {
         write_indent(f, indent)?;
-        match &self.kind {
-            StatementKind::FunctionDef {
-                name,
-                args,
-                body,
-                decorator_list,
-                returns,
-            } => write_funcdef(
-                f,
-                indent,
-                name,
-                args,
-                body,
-                decorator_list,
-                returns.as_ref().map(Deref::deref),
-                false,
-            ),
-            StatementKind::AsyncFunctionDef {
-                name,
-                args,
-                body,
-                decorator_list,
-                returns,
-            } => write_funcdef(
-                f,
-                indent,
-                name,
-                args,
-                body,
-                decorator_list,
-                returns.as_ref().map(Deref::deref),
-                true,
-            ),
-            StatementKind::ClassDef {
-                name,
-                bases,
-                keywords,
-                body,
-                decorator_list,
-            } => {
-                for dec in decorator_list {
+        match self {
+            Statement::FunctionDef(node) => write_funcdef(f, indent, node, false),
+            Statement::AsyncFunctionDef(node) => write_funcdef(f, indent, node, true),
+            Statement::ClassDef(node) => {
+                for dec in &node.decorator_list {
                     writeln!(f, "@{}", dec)?;
                     write_indent(f, indent)?;
                 }
-                write!(f, "class {}", name)?;
-                if !bases.is_empty() || !keywords.is_empty() {
+                write!(f, "class {}", node.name)?;
+                if !node.bases.is_empty() || !node.keywords.is_empty() {
                     f.write_str("(")?;
-                    write_joined(f, bases, ", ")?;
-                    if !bases.is_empty() && !keywords.is_empty() {
+                    write_joined(f, &node.bases, ", ")?;
+                    if !node.bases.is_empty() && !node.keywords.is_empty() {
                         f.write_str(", ")?;
                     }
-                    write_joined(f, keywords, ", ")?;
+                    write_joined(f, &node.keywords, ", ")?;
                     f.write_str(")")?;
                 }
                 f.write_str(":\n")?;
-                write_body(f, indent + 1, body)
+                write_body(f, indent + 1, &node.body)
             }
-            StatementKind::Return { value } => match value {
+            Statement::Return(Return { value, .. }) => match value {
                 Some(v) => write!(f, "return {}", v),
                 _ => write!(f, "return"),
             },
-            StatementKind::Delete { targets } => {
+            Statement::Delete(Delete { targets, .. }) => {
                 write!(f, "del ")?;
                 write_joined(f, targets, ", ")
             }
-            StatementKind::Assign { targets, value } => {
+            Statement::Assign(Assign { targets, value, .. }) => {
                 write_joined(f, targets, " = ")?;
                 write!(f, " = {}", value)
             }
-            StatementKind::AugAssign { target, op, value } => {
-                write!(f, "{} {}= {}", target, op, value)
-            }
-            StatementKind::AnnAssign {
-                target,
-                annotation,
-                value,
-                ..
-            } => {
-                write!(f, "{}: {}", target, annotation)?;
-                if let Some(value) = value {
+            Statement::AugAssign(AugAssign {
+                target, op, value, ..
+            }) => write!(f, "{} {}= {}", target, op, value),
+            Statement::AnnAssign(node) => {
+                write!(f, "{}: {}", node.target, node.annotation)?;
+                if let Some(value) = &node.value {
                     write!(f, " = {}", value)?;
                 }
                 Ok(())
             }
-            StatementKind::For {
-                target,
-                iter,
-                body,
-                orelse,
-            } => write_for(f, indent, target, iter, body, orelse, false),
-            StatementKind::AsyncFor {
-                target,
-                iter,
-                body,
-                orelse,
-            } => write_for(f, indent, target, iter, body, orelse, true),
-            StatementKind::While { test, body, orelse } => {
-                writeln!(f, "while {}:", test)?;
-                write_body(f, indent + 1, body)?;
-                if !orelse.is_empty() {
+            Statement::For(node) => write_for(f, indent, node, false),
+            Statement::AsyncFor(node) => write_for(f, indent, node, true),
+            Statement::While(node) => {
+                writeln!(f, "while {}:", node.test)?;
+                write_body(f, indent + 1, &node.body)?;
+                if !node.orelse.is_empty() {
                     write_indent(f, indent)?;
                     f.write_str("else:\n")?;
-                    write_body(f, indent + 1, orelse)?;
+                    write_body(f, indent + 1, &node.orelse)?;
                 }
                 Ok(())
             }
-            StatementKind::If { test, body, orelse } => write_if(f, indent, test, body, orelse),
-            StatementKind::With { items, body } => write_with(f, indent, items, body, false),
-            StatementKind::AsyncWith { items, body } => write_with(f, indent, items, body, true),
-            StatementKind::Raise { exc, cause } => {
+            Statement::If(node) => write_if(f, indent, node),
+            Statement::With(node) => write_with(f, indent, node, false),
+            Statement::AsyncWith(node) => write_with(f, indent, node, true),
+            Statement::Raise(Raise { exc, cause, .. }) => {
                 write!(f, "raise")?;
                 if let Some(exc) = exc {
                     write!(f, " {}", exc)?;
@@ -700,67 +869,58 @@ impl Statement {
                 }
                 Ok(())
             }
-            StatementKind::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => {
+            Statement::Try(node) => {
                 f.write_str("try:\n")?;
-                write_body(f, indent + 1, body)?;
-                for hdl in handlers {
+                write_body(f, indent + 1, &node.body)?;
+                for hdl in &node.handlers {
                     hdl.fmt_indented(f, indent)?;
                 }
-                if !orelse.is_empty() {
+                if !node.orelse.is_empty() {
                     write_indent(f, indent)?;
                     f.write_str("else:\n")?;
-                    write_body(f, indent + 1, orelse)?;
+                    write_body(f, indent + 1, &node.orelse)?;
                 }
-                if !finalbody.is_empty() {
+                if !node.finalbody.is_empty() {
                     write_indent(f, indent)?;
                     f.write_str("finally:\n")?;
-                    write_body(f, indent + 1, finalbody)?;
+                    write_body(f, indent + 1, &node.finalbody)?;
                 }
                 Ok(())
             }
-            StatementKind::Assert { test, msg } => {
+            Statement::Assert(Assert { test, msg, .. }) => {
                 write!(f, "assert {}", test)?;
                 if let Some(msg) = msg {
                     write!(f, ", {}", msg)?;
                 }
                 Ok(())
             }
-            StatementKind::Import { names } => {
+            Statement::Import(Import { names, .. }) => {
                 f.write_str("import ")?;
                 write_joined(f, names, ", ")
             }
-            StatementKind::ImportFrom {
-                module,
-                names,
-                level,
-            } => {
+            Statement::ImportFrom(node) => {
                 f.write_str("from ")?;
-                for _ in 0..*level {
+                for _ in 0..node.level {
                     f.write_str(".")?;
                 }
-                if let Some(module) = module {
+                if let Some(module) = &node.module {
                     write!(f, "{}", module)?;
                 }
                 f.write_str(" import ")?;
-                write_joined(f, names, ", ")
+                write_joined(f, &node.names, ", ")
             }
-            StatementKind::Global { names } => {
+            Statement::Global(Global { names, .. }) => {
                 f.write_str("global ")?;
                 write_joined(f, names, ", ")
             }
-            StatementKind::Nonlocal { names } => {
+            Statement::Nonlocal(Nonlocal { names, .. }) => {
                 f.write_str("nonlocal ")?;
                 write_joined(f, names, ", ")
             }
-            StatementKind::Expr { value } => write!(f, "{}", value),
-            StatementKind::Pass => f.write_str("pass"),
-            StatementKind::Break => f.write_str("break"),
-            StatementKind::Continue => f.write_str("continue"),
+            Statement::Expr(Expr { value, .. }) => write!(f, "{}", value),
+            Statement::Pass(_) => f.write_str("pass"),
+            Statement::Break(_) => f.write_str("break"),
+            Statement::Continue(_) => f.write_str("continue"),
         }
     }
 }
@@ -773,21 +933,15 @@ impl Display for Statement {
 
 impl Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)
-    }
-}
-
-impl Display for ExpressionKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExpressionKind::BoolOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
-            ExpressionKind::BinOp { left, op, right } => write!(f, "{} {} {}", left, op, right),
-            ExpressionKind::UnaryOp { op, operand } => write!(f, "{} {}", op, operand),
-            ExpressionKind::Lambda { args, body, .. } => write!(f, "lambda {}: {}", args, body),
-            ExpressionKind::IfExp { test, body, orelse } => {
-                write!(f, "{} if {} else {}", body, test, orelse)
+            Expression::BoolOp(node) => write!(f, "{} {} {}", node.left, node.op, node.right),
+            Expression::BinOp(node) => write!(f, "{} {} {}", node.left, node.op, node.right),
+            Expression::UnaryOp(UnaryOp { op, operand, .. }) => write!(f, "{} {}", op, operand),
+            Expression::Lambda(Lambda { args, body, .. }) => write!(f, "lambda {}: {}", args, body),
+            Expression::IfExp(node) => {
+                write!(f, "{} if {} else {}", node.body, node.test, node.orelse)
             }
-            ExpressionKind::Dict { keys, values } => {
+            Expression::Dict(Dict { keys, values, .. }) => {
                 fn write_kv(
                     f: &mut fmt::Formatter<'_>,
                     key: &Option<Expression>,
@@ -810,94 +964,84 @@ impl Display for ExpressionKind {
                 }
                 f.write_str("}")
             }
-            ExpressionKind::Set { elts, .. } => {
+            Expression::Set(Set { elts, .. }) => {
                 f.write_str("{")?;
                 write_joined(f, elts, ", ")?;
                 f.write_str("}")
             }
-            ExpressionKind::ListComp { elt, generators } => {
-                write!(f, "[{} ", elt)?;
-                write_joined(f, generators, " ")?;
+            Expression::ListComp(node) => {
+                write!(f, "[{} ", node.elt)?;
+                write_joined(f, &node.generators, " ")?;
                 f.write_str("]")
             }
-            ExpressionKind::SetComp { elt, generators } => {
-                write!(f, "{{{} ", elt)?;
-                write_joined(f, generators, " ")?;
+            Expression::SetComp(node) => {
+                write!(f, "{{{} ", node.elt)?;
+                write_joined(f, &node.generators, " ")?;
                 f.write_str("}")
             }
-            ExpressionKind::DictComp {
-                key,
-                value,
-                generators,
-            } => {
-                write!(f, "{{{}: {} ", key, value)?;
-                write_joined(f, generators, " ")?;
+            Expression::DictComp(node) => {
+                write!(f, "{{{}: {} ", node.key, node.value)?;
+                write_joined(f, &node.generators, " ")?;
                 f.write_str("}")
             }
-            ExpressionKind::GeneratorExp { elt, generators } => {
-                write!(f, "({} ", elt)?;
-                write_joined(f, generators, " ")?;
+            Expression::GeneratorExp(node) => {
+                write!(f, "({} ", node.elt)?;
+                write_joined(f, &node.generators, " ")?;
                 f.write_str(")")
             }
-            ExpressionKind::Await { value } => write!(f, "await {}", value),
-            ExpressionKind::Yield { value } => match value {
+            Expression::Await(Await { value, .. }) => write!(f, "await {}", value),
+            Expression::Yield(Yield { value, .. }) => match value {
                 Some(value) => write!(f, "yield {}", value),
                 _ => write!(f, "yield"),
             },
-            ExpressionKind::YieldFrom { value } => write!(f, "yield from {}", value),
-            ExpressionKind::Compare {
-                left,
-                ops,
-                comparators,
-            } => {
-                write!(f, "{}", left)?;
-                for (op, e) in ops.iter().zip(comparators) {
+            Expression::YieldFrom(YieldFrom { value, .. }) => write!(f, "yield from {}", value),
+            Expression::Compare(node) => {
+                write!(f, "{}", node.left)?;
+                for (op, e) in node.ops.iter().zip(&node.comparators) {
                     write!(f, " {} {}", op, e)?
                 }
                 Ok(())
             }
-            ExpressionKind::Call {
-                func,
-                args,
-                keywords,
-            } => {
-                write!(f, "{}(", func)?;
-                write_joined(f, args, ", ")?;
-                if !args.is_empty() && !keywords.is_empty() {
+            Expression::Call(node) => {
+                write!(f, "{}(", node.func)?;
+                write_joined(f, &node.args, ", ")?;
+                if !node.args.is_empty() && !node.keywords.is_empty() {
                     f.write_str(", ")?;
                 }
-                write_joined(f, keywords, ", ")?;
+                write_joined(f, &node.keywords, ", ")?;
                 f.write_str(")")
             }
-            ExpressionKind::Num { n } => write!(f, "{}", n),
-            ExpressionKind::Str { s } => {
+            Expression::Num(Num { value, .. }) => write!(f, "{}", value),
+            Expression::Str(Str { value, .. }) => {
                 f.write_str("\"")?;
-                for b in s.bytes() {
+                for b in value.bytes() {
                     write_escaped(f, b)?;
                 }
                 f.write_str("\"")
             }
-            ExpressionKind::FormattedValue { .. } => unimplemented!(),
-            ExpressionKind::JoinedStr { .. } => unimplemented!(),
-            ExpressionKind::Bytes { s } => {
+            Expression::FormattedValue(FormattedValue { .. }) => unimplemented!(),
+            Expression::JoinedStr(JoinedStr { .. }) => unimplemented!(),
+            Expression::Bytes(Bytes { value, .. }) => {
                 f.write_str("b\"")?;
-                for b in s {
+                for b in value {
                     write_escaped(f, *b)?;
                 }
                 f.write_str("\"")
             }
-            ExpressionKind::NameConstant { value } => write!(f, "{}", value),
-            ExpressionKind::Ellipsis { .. } => write!(f, "..."),
-            ExpressionKind::Attribute { value, attr, .. } => write!(f, "{}.{}", value, attr),
-            ExpressionKind::Subscript { value, slice, .. } => write!(f, "{}[{}]", value, slice),
-            ExpressionKind::Starred { value, .. } => write!(f, "*{}", value),
-            ExpressionKind::Name { id, .. } => write!(f, "{}", id),
-            ExpressionKind::List { elts, .. } => {
+            Expression::NameConstant(NameConstant { value, .. }) => write!(f, "{}", value),
+            Expression::Ellipsis(Ellipsis { .. }) => write!(f, "..."),
+            Expression::Attribute(Attribute { value, attr, .. }) => write!(f, "{}.{}", value, attr),
+            Expression::Subscript(Subscript { value, slice, .. }) => {
+                write!(f, "{}[{}]", value, slice)
+            }
+            Expression::Starred(Starred { value, .. }) => write!(f, "*{}", value),
+            Expression::Name(Name { id, .. }) => write!(f, "{}", id),
+            Expression::List(List { elts, .. }) => {
                 f.write_str("[")?;
                 write_joined(f, elts, ", ")?;
                 f.write_str("]")
             }
-            ExpressionKind::Tuple { elts, .. } => {
+            Expression::Tuple(Tuple { elts, .. }) => {
                 f.write_str("(")?;
                 write_joined(f, elts, ", ")?;
                 f.write_str(")")
@@ -929,62 +1073,62 @@ impl Display for Slice {
     }
 }
 
-impl Display for BooleanOperator {
+impl Display for BoolOpKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            BooleanOperator::And => "and",
-            BooleanOperator::Or => "or",
+            BoolOpKind::And => "and",
+            BoolOpKind::Or => "or",
         };
         f.write_str(s)
     }
 }
 
-impl Display for Operator {
+impl Display for OpKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Operator::Addition => "+",
-            Operator::Subtraction => "-",
-            Operator::Multiplication => "*",
-            Operator::MatrixMultiplication => "@",
-            Operator::Division => "/",
-            Operator::Modulo => "%",
-            Operator::Power => "**",
-            Operator::LeftShift => "<<",
-            Operator::RightShift => ">>",
-            Operator::BitOr => "|",
-            Operator::BitXor => "^",
-            Operator::BitAnd => "&",
-            Operator::FloorDivision => "//",
+            OpKind::Addition => "+",
+            OpKind::Subtraction => "-",
+            OpKind::Multiplication => "*",
+            OpKind::MatrixMultiplication => "@",
+            OpKind::Division => "/",
+            OpKind::Modulo => "%",
+            OpKind::Power => "**",
+            OpKind::LeftShift => "<<",
+            OpKind::RightShift => ">>",
+            OpKind::BitOr => "|",
+            OpKind::BitXor => "^",
+            OpKind::BitAnd => "&",
+            OpKind::FloorDivision => "//",
         };
         f.write_str(s)
     }
 }
 
-impl Display for UnaryOperator {
+impl Display for UnaryOpKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            UnaryOperator::Invert => "~",
-            UnaryOperator::Not => "not",
-            UnaryOperator::Plus => "+",
-            UnaryOperator::Minus => "-",
+            UnaryOpKind::Invert => "~",
+            UnaryOpKind::Not => "not",
+            UnaryOpKind::Plus => "+",
+            UnaryOpKind::Minus => "-",
         };
         f.write_str(s)
     }
 }
 
-impl Display for ComparisonOperator {
+impl Display for ComparisonOpKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            ComparisonOperator::Equal => "==",
-            ComparisonOperator::NotEqual => "!=",
-            ComparisonOperator::Less => "<",
-            ComparisonOperator::LessEqual => "<=",
-            ComparisonOperator::Greater => ">",
-            ComparisonOperator::GreaterEqual => ">=",
-            ComparisonOperator::Is => "is",
-            ComparisonOperator::IsNot => "is not",
-            ComparisonOperator::In => "in",
-            ComparisonOperator::NotIn => "not in",
+            ComparisonOpKind::Equal => "==",
+            ComparisonOpKind::NotEqual => "!=",
+            ComparisonOpKind::Less => "<",
+            ComparisonOpKind::LessEqual => "<=",
+            ComparisonOpKind::Greater => ">",
+            ComparisonOpKind::GreaterEqual => ">=",
+            ComparisonOpKind::Is => "is",
+            ComparisonOpKind::IsNot => "is not",
+            ComparisonOpKind::In => "in",
+            ComparisonOpKind::NotIn => "not in",
         };
         f.write_str(s)
     }
@@ -1079,11 +1223,11 @@ impl Display for WithItem {
     }
 }
 
-impl Display for Number {
+impl Display for NumKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Number::Integer(n) => write!(f, "{}", n),
-            Number::Float(n) | Number::Complex(n) => write!(f, "{}", n),
+            NumKind::Integer(n) => write!(f, "{}", n),
+            NumKind::Float(n) | NumKind::Complex(n) => write!(f, "{}", n),
         }
     }
 }

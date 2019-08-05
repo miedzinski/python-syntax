@@ -40,21 +40,26 @@ Decorator: ast::Expression = {
     "@" <DecoratorName> NEWLINE,
     "@" <l:@L> <d:DecoratorName> "(" <a:ArgList?> ")" <r:@R> NEWLINE => {
         let (args, keywords) = a.unwrap_or_default();
-        ast::ExpressionKind::Call {
-            func: Box::new(d),
+        ast::Expression::Call(ast::Call {
+        func: Box::new(d),
+            span: Span::new(l, r),
             args,
             keywords,
-        }.spanned(l, r)
+        })
     },
 };
 
 DecoratorName: ast::Expression = {
-    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name { id }.spanned(l, r),
+    <l:@L> <id:NAME> <r:@R> => ast::Expression::Name(ast::Name {
+        span: Span::new(l, r),
+        id,
+    }),
     <l:@L> <d:DecoratorName> "." <n:NAME> <r:@R> => {
-        ast::ExpressionKind::Attribute {
+        ast::Expression::Attribute(ast::Attribute {
+            span: Span::new(l, r),
             value: Box::new(d),
             attr: n,
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -63,13 +68,15 @@ Decoratable: ast::Statement = {ClassDef, FuncDef, AsyncFuncDef};
 Decorated: ast::Statement = {
     <l:@L> <v:Decorator+> <s:Decoratable> => {
         let mut s = s;
-        s.span.start = l;
-        match s.kind {
-            ast::StatementKind::ClassDef { ref mut decorator_list, .. }
-                | ast::StatementKind::FunctionDef { ref mut decorator_list, .. }
-                | ast::StatementKind::AsyncFunctionDef {
-                    ref mut decorator_list, ..
-            } => {
+        match s {
+            ast::Statement::ClassDef(ast::ClassDef {
+                ref mut span, ref mut decorator_list, .. })
+            | ast::Statement::FunctionDef(ast::FunctionDef {
+                ref mut span, ref mut decorator_list, .. })
+            | ast::Statement::AsyncFunctionDef(ast::AsyncFunctionDef {
+                ref mut span, ref mut decorator_list, .. })
+            => {
+                span.start = l;
                 *decorator_list = v;
             }
             _ => unreachable!(),
@@ -80,20 +87,22 @@ Decorated: ast::Statement = {
 
 AsyncFuncDef: ast::Statement = {
     <l:@L> "async" <s:FuncDef> <r:@R> => {
-        match s.kind {
-            ast::StatementKind::FunctionDef {
+        match s {
+            ast::Statement::FunctionDef(ast::FunctionDef {
                 name,
                 args,
                 body,
                 decorator_list,
                 returns,
-            } => ast::StatementKind::AsyncFunctionDef {
+                ..
+            }) => ast::Statement::AsyncFunctionDef(ast::AsyncFunctionDef {
+                span: Span::new(l, r),
                 name,
                 args,
                 body,
                 decorator_list,
-                returns
-            }.spanned(l, r),
+                returns,
+            }),
             _ => unreachable!(),
         }
     },
@@ -102,13 +111,14 @@ AsyncFuncDef: ast::Statement = {
 FuncDef: ast::Statement = {
     <l:@L> "def" <n:NAME> "(" <v:TypedParamList?> ")" <t:("->" <Test>)?> ":" <s:Suite> <r:@R>
     => {
-        ast::StatementKind::FunctionDef {
+        ast::Statement::FunctionDef(ast::FunctionDef {
+            span: Span::new(l, r),
             name: n,
             args: v.map(Box::new).unwrap_or_default(),
             body: s,
             decorator_list: vec![],
             returns: t.map(Box::new),
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -208,67 +218,74 @@ SmallStatement: ast::Statement = {
 
 ExprStatement: ast::Statement = {
     <l:@L> <t:TestListStarExpr> <r:@R> => {
-        ast::StatementKind::Expr { value: Box::new(t) }.spanned(l, r)
+        ast::Statement::Expr(ast::Expr {
+            span: Span::new(l, r),
+            value: Box::new(t),
+        })
     },
     <l:@L> <t:TestListStarExpr> ":" <a:Test> <v:("=" <Test>)?> <r:@R> => {
         let simple = match t {
-            ast::Expression {
+            ast::Expression::Name(ast::Name {
                 span: Span { start, .. },
-                kind: ast::ExpressionKind::Name { .. },
-            } if start == l => true,
+                ..
+            }) if start == l => true,
             _ => false,
         };
-        ast::StatementKind::AnnAssign {
+        ast::Statement::AnnAssign(ast::AnnAssign {
+            span: Span::new(l, r),
             target: Box::new(t),
             annotation: Box::new(a),
             value: v.map(Box::new),
             simple,
-        }.spanned(l, r)
+        })
     },
     <l:@L> <t:TestListStarExpr> <op:AugAssign> <v:AssignValue> <r:@R> => {
-        ast::StatementKind::AugAssign {
+        ast::Statement::AugAssign(ast::AugAssign {
+            span: Span::new(l, r),
             target: Box::new(t),
             op,
             value: Box::new(v),
-        }.spanned(l, r)
+        })
     },
     <l:@L> <t:TestListStarExpr> <v:("=" <AssignValue>)+> <r:@R> => {
         let (targets, value) = v.split_at(v.len() - 1);
-        ast::StatementKind::Assign {
+        ast::Statement::Assign(ast::Assign {
+            span: Span::new(l, r),
             targets: iter::once(t).chain(targets.iter().cloned()).collect(),
             value: Box::new(value[0].clone()),
-        }.spanned(l, r)
+        })
     },
 };
 
-AugAssign: ast::Operator = {
-    "+=" => ast::Operator::Addition,
-    "-=" => ast::Operator::Subtraction,
-    "*=" => ast::Operator::Multiplication,
-    "@=" => ast::Operator::MatrixMultiplication,
-    "/=" => ast::Operator::Division,
-    "%=" => ast::Operator::Modulo,
-    "**=" => ast::Operator::Power,
-    "<<=" => ast::Operator::LeftShift,
-    ">>=" => ast::Operator::RightShift,
-    "|=" => ast::Operator::BitOr,
-    "^=" => ast::Operator::BitXor,
-    "&=" => ast::Operator::BitAnd,
-    "//=" => ast::Operator::FloorDivision,
+AugAssign: ast::OpKind = {
+    "+=" => ast::OpKind::Addition,
+    "-=" => ast::OpKind::Subtraction,
+    "*=" => ast::OpKind::Multiplication,
+    "@=" => ast::OpKind::MatrixMultiplication,
+    "/=" => ast::OpKind::Division,
+    "%=" => ast::OpKind::Modulo,
+    "**=" => ast::OpKind::Power,
+    "<<=" => ast::OpKind::LeftShift,
+    ">>=" => ast::OpKind::RightShift,
+    "|=" => ast::OpKind::BitOr,
+    "^=" => ast::OpKind::BitXor,
+    "&=" => ast::OpKind::BitAnd,
+    "//=" => ast::OpKind::FloorDivision,
 };
 
 AssignValue: ast::Expression = {YieldExpr, TestList};
 
 DelStatement: ast::Statement = {
     <l:@L> "del" <v:Comma<ExprOrStar>> ","? <r:@R> => {
-        ast::StatementKind::Delete {
+        ast::Statement::Delete(ast::Delete {
+            span: Span::new(l, r),
             targets: v,
-        }.spanned(l, r)
+        })
     }
 };
 
 PassStatement: ast::Statement = <l:@L> "pass" <r:@R> => {
-    ast::StatementKind::Pass.spanned(l, r)
+    ast::Statement::Pass(ast::Pass { span: Span::new(l, r) })
 };
 
 FlowStatement: ast::Statement = {
@@ -280,47 +297,59 @@ FlowStatement: ast::Statement = {
 };
 
 BreakStatement: ast::Statement = <l:@L> "break" <r:@R> => {
-    ast::StatementKind::Break.spanned(l, r)
+    ast::Statement::Break(ast::Break { span: Span::new(l, r) })
 };
 
 ContinueStatement: ast::Statement = <l:@L> "continue" <r:@R> => {
-    ast::StatementKind::Continue.spanned(l, r)
+    ast::Statement::Continue(ast::Continue { span: Span::new(l, r) })
 };
 
 ReturnStatement: ast::Statement = <l:@L> "return" <t:TestList?> <r:@R> => {
-    ast::StatementKind::Return { value: t.map(Box::new) }.spanned(l, r)
+    ast::Statement::Return(ast::Return {
+        span: Span::new(l, r),
+        value: t.map(Box::new),
+    })
 };
 
 YieldStatement: ast::Statement = <l:@L> <e:YieldExpr> <r:@R> => {
-    ast::StatementKind::Expr { value: Box::new(e) }.spanned(l, r)
+    ast::Statement::Expr(ast::Expr {
+        span: Span::new(l, r),
+        value: Box::new(e),
+    })
 };
 
 RaiseStatement: ast::Statement = {
-    <l:@L> "raise" <e:Test?> <r:@R> => ast::StatementKind::Raise {
+    <l:@L> "raise" <e:Test?> <r:@R> => ast::Statement::Raise(ast::Raise {
+        span: Span::new(l, r),
         exc: e.map(Box::new),
         cause: None,
-    }.spanned(l, r),
+    }),
     <l:@L> "raise" <e:Test> "from" <c:Test> <r:@R> => {
-        ast::StatementKind::Raise {
+        ast::Statement::Raise(ast::Raise {
+            span: Span::new(l, r),
             exc: Some(Box::new(e)),
             cause: Some(Box::new(c)),
-        }.spanned(l, r)
+        })
     },
 };
 
 ImportStatement: ast::Statement = {ImportName, ImportFrom};
 
 ImportName: ast::Statement = <l:@L> "import" <v:DottedAsNames> <r:@R> => {
-    ast::StatementKind::Import { names: v }.spanned(l, r)
+    ast::Statement::Import(ast::Import {
+        span: Span::new(l, r),
+        names: v,
+    })
 };
 
 ImportFrom: ast::Statement = {
     <l:@L> "from" <m:ImportFromModule> "import" <n:ImportFromNames> <r:@R> => {
-        ast::StatementKind::ImportFrom {
+        ast::Statement::ImportFrom(ast::ImportFrom {
+            span: Span::new(l, r),
             module: m.0,
             names: n,
             level: m.1,
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -364,22 +393,29 @@ DottedName: String = <v:Sep<NAME, ".">> => v.concat();
 
 GlobalStatement: ast::Statement = {
     <l:@L> "global" <v:Comma<NAME>> <r:@R> => {
-        ast::StatementKind::Global { names: v }.spanned(l, r)
+        ast::Statement::Global(ast::Global {
+            span: Span::new(l, r),
+            names: v,
+        })
     },
 };
 
 NonlocalStatement: ast::Statement = {
     <l:@L> "nonlocal" <v:Comma<NAME>> <r:@R> => {
-        ast::StatementKind::Nonlocal { names: v }.spanned(l, r)
+        ast::Statement::Nonlocal(ast::Nonlocal {
+            span: Span::new(l, r),
+            names: v,
+        })
     },
 };
 
 AssertStatement: ast::Statement = {
     <l:@L> "assert" <t:Test> <m:("," <Test>)?> <r:@R> => {
-        ast::StatementKind::Assert {
+        ast::Statement::Assert(ast::Assert {
+            span: Span::new(l, r),
             test: Box::new(t),
             msg: m.map(Box::new),
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -398,25 +434,27 @@ CompoundStatement: ast::Statement = {
 AsyncStatement: ast::Statement = {
     AsyncFuncDef,
     <l:@L> "async" <s:WithStatement> <r:@R> => {
-        match s.kind {
-            ast::StatementKind::With { items, body } => {
-                ast::StatementKind::AsyncWith {
+        match s {
+            ast::Statement::With(ast::With { items, body, .. }) => {
+                ast::Statement::AsyncWith(ast::AsyncWith {
+                    span: Span::new(l, r),
                     items,
                     body,
-                }.spanned(l, r)
+                })
             }
             _ => unreachable!(),
         }
     },
     <l:@L> "async" <s:ForStatement> <r:@R> => {
-        match s.kind {
-            ast::StatementKind::For { target, iter, body, orelse } => {
-                ast::StatementKind::AsyncFor {
+        match s {
+            ast::Statement::For(ast::For { target, iter, body, orelse, .. }) => {
+                ast::Statement::AsyncFor(ast::AsyncFor {
+                    span: Span::new(l, r),
                     target,
                     iter,
                     body,
                     orelse,
-                }.spanned(l, r)
+                })
             }
             _ => unreachable!(),
         }
@@ -425,32 +463,35 @@ AsyncStatement: ast::Statement = {
 
 IfStatement: ast::Statement = {
     <l:@L> "if" <t:Test> ":" <s:Suite> <e:ElseStatement?> <r:@R> => {
-        ast::StatementKind::If {
+        ast::Statement::If(ast::If {
+            span: Span::new(l, r),
             test: Box::new(t),
             body: s,
             orelse: e.unwrap_or_default(),
-        }.spanned(l, r)
+        })
     }
 };
 
 ElseStatement: Vec<ast::Statement> = {
     <l:@L> "elif" <t:Test> ":" <s:Suite> <e:ElseStatement?> <r:@R> => {
-        vec![ast::StatementKind::If {
+        vec![ast::Statement::If(ast::If {
+            span: Span::new(l, r),
             test: Box::new(t),
             body: s,
             orelse: e.unwrap_or_default(),
-        }.spanned(l, r)]
+        })]
     },
     "else" ":" <Suite>,
 };
 
 WhileStatement: ast::Statement = {
     <l:@L> "while" <t:Test> ":" <b:Suite> <e:("else" ":" <Suite>)?> <r:@R> => {
-        ast::StatementKind::While {
+        ast::Statement::While(ast::While {
+            span: Span::new(l, r),
             test: Box::new(t),
             body: b,
             orelse: e.unwrap_or_default(),
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -458,12 +499,13 @@ ForStatement: ast::Statement = {
     <l:@L> "for" <t:ExprList> "in" <i:TestList> ":" <b:Suite>
         <e:("else" ":" <Suite>)?> <r:@R>
     => {
-        ast::StatementKind::For {
+        ast::Statement::For(ast::For {
+            span: Span::new(l, r),
             target: Box::new(t),
             iter: Box::new(i),
             body: b,
             orelse: e.unwrap_or_default(),
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -471,20 +513,22 @@ TryStatement: ast::Statement = {
     <l:@L> "try" ":" <b:Suite> <c:ExceptClauseList>
         <e:("else" ":" <Suite>)?> <f:("finally" ":" <Suite>)?> <r:@R>
     => {
-        ast::StatementKind::Try {
+        ast::Statement::Try(ast::Try {
+            span: Span::new(l, r),
             body: b,
             handlers: c,
             orelse: e.unwrap_or_default(),
             finalbody: f.unwrap_or_default(),
-        }.spanned(l, r)
+        })
     },
     <l:@L> "try" ":" <b:Suite> "finally" ":" <f:Suite> <r:@R> => {
-        ast::StatementKind::Try {
+        ast::Statement::Try(ast::Try {
+            span: Span::new(l, r),
             body: b,
             handlers: vec![],
             orelse: vec![],
             finalbody: f,
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -523,10 +567,11 @@ DefaultExceptClause: ast::ExceptHandler = {
 
 WithStatement: ast::Statement = {
     <l:@L> "with" <v:Comma<WithItem>> ":" <s:Suite> <r:@R> => {
-        ast::StatementKind::With {
+        ast::Statement::With(ast::With{
+            span: Span::new(l, r),
             items: v,
             body: s,
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -540,13 +585,14 @@ WithItem: ast::WithItem = <t:Test> <e:("as" <Expr>)?> => {
 ClassDef: ast::Statement = {
     <l:@L> "class" <n:NAME> <a:("(" <ArgList> ")")?> ":" <s:Suite> <r:@R> => {
         let (bases, keywords) = a.unwrap_or_default();
-        ast::StatementKind::ClassDef {
+        ast::Statement::ClassDef(ast::ClassDef {
+            span: Span::new(l, r),
             name: n,
             bases,
             keywords,
             body: s,
             decorator_list: vec![],
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -559,11 +605,12 @@ Test: ast::Expression = {Cond, OrTest, Lambda<Test>};
 
 Cond: ast::Expression = {
     <l:@L> <t1:OrTest> "if" <t2:OrTest> "else" <t3:Test> <r:@R> => {
-        ast::ExpressionKind::IfExp {
+        ast::Expression::IfExp(ast::IfExp {
+            span: Span::new(l, r),
             test: Box::new(t2),
             body: Box::new(t1),
             orelse: Box::new(t3),
-        }.spanned(l, r)
+        })
     },
 };
 
@@ -571,120 +618,132 @@ TestNoCond: ast::Expression = {OrTest, Lambda<TestNoCond>};
 
 Lambda<T>: ast::Expression = {
     <l:@L> "lambda" <v:UntypedParamList?> ":" <t:T> <r:@R> => {
-        ast::ExpressionKind::Lambda {
+        ast::Expression::Lambda(ast::Lambda {
+            span: Span::new(l, r),
             args: Box::new(v.unwrap_or_default()),
             body: Box::new(t),
-        }.spanned(l, r)
+        })
     },
 };
 
 BoolExpr<O, E>: ast::Expression = <l:@L> <e:E> <v:(O E)*> => {
     v.into_iter().fold(e, |acc, (op, e)| {
-        let r = e.span.end;
-        ast::ExpressionKind::BoolOp {
+        let r = e.span().end;
+        ast::Expression::BoolOp(ast::BoolOp {
+            span: Span::new(l, r),
             left: Box::new(acc),
             op,
             right: Box::new(e),
-        }.spanned(l, r)
+        })
     })
 };
 
-OrOp: ast::BooleanOperator = "or" => ast::BooleanOperator::Or;
-AndOp: ast::BooleanOperator = "and" => ast::BooleanOperator::And;
+OrOp: ast::BoolOpKind = "or" => ast::BoolOpKind::Or;
+AndOp: ast::BoolOpKind = "and" => ast::BoolOpKind::And;
 
 OrTest: ast::Expression = BoolExpr<OrOp, AndTest>;
 AndTest: ast::Expression = BoolExpr<AndOp, NotTest>;
 
 NotTest: ast::Expression = {
     <l:@L> "not" <t:NotTest> <r:@R> => {
-        ast::ExpressionKind::UnaryOp {
-            op: ast::UnaryOperator::Not,
+        ast::Expression::UnaryOp(ast::UnaryOp {
+            span: Span::new(l, r),
+            op: ast::UnaryOpKind::Not,
             operand: Box::new(t),
-        }.spanned(l, r)
+        })
     },
     Comparison,
 };
 
-CompOp: ast::ComparisonOperator = {
-    "<" => ast::ComparisonOperator::Less,
-    ">" => ast::ComparisonOperator::Greater,
-    "==" => ast::ComparisonOperator::Equal,
-    ">=" => ast::ComparisonOperator::GreaterEqual,
-    "<=" => ast::ComparisonOperator::LessEqual,
-    "!=" => ast::ComparisonOperator::NotEqual,
-    "in" => ast::ComparisonOperator::In,
-    "not" "in" => ast::ComparisonOperator::NotIn,
-    "is" "not" => ast::ComparisonOperator::IsNot,
-    "is" => ast::ComparisonOperator::Is,
+CompOp: ast::ComparisonOpKind = {
+    "<" => ast::ComparisonOpKind::Less,
+    ">" => ast::ComparisonOpKind::Greater,
+    "==" => ast::ComparisonOpKind::Equal,
+    ">=" => ast::ComparisonOpKind::GreaterEqual,
+    "<=" => ast::ComparisonOpKind::LessEqual,
+    "!=" => ast::ComparisonOpKind::NotEqual,
+    "in" => ast::ComparisonOpKind::In,
+    "not" "in" => ast::ComparisonOpKind::NotIn,
+    "is" "not" => ast::ComparisonOpKind::IsNot,
+    "is" => ast::ComparisonOpKind::Is,
 };
 
 Comparison: ast::Expression = <l:@L> <e:Expr> <v:(CompOp Expr)*> <r:@R> => {
     if !v.is_empty() {
         let (ops, comparators) = v.into_iter().unzip();
-        ast::ExpressionKind::Compare {
+        ast::Expression::Compare(ast::Compare {
+            span: Span::new(l, r),
             left: Box::new(e),
             ops,
             comparators,
-        }.spanned(l, r)
+        })
     } else {
         e
     }
 };
 
 StarExpr: ast::Expression = <l:@L> "*" <e:Expr> <r:@R> => {
-    ast::ExpressionKind::Starred { value: Box::new(e) }.spanned(l, r)
+    ast::Expression::Starred(ast::Starred {
+        span: Span::new(l, r),
+        value: Box::new(e),
+    })
 };
 
 BinExpr<O, E>: ast::Expression = <l:@L> <e:E> <v:(O E)*> => {
     v.into_iter().fold(e, |acc, (op, e)| {
-        let r = e.span.end;
-        ast::ExpressionKind::BinOp {
+        let r = e.span().end;
+        ast::Expression::BinOp(ast::BinOp {
+            span: Span::new(l, r),
             left: Box::new(acc),
             op,
             right: Box::new(e),
-        }.spanned(l, r)
+        })
     })
 };
 
-BitOrOp: ast::Operator = "|" => ast::Operator::BitOr;
+BitOrOp: ast::OpKind = "|" => ast::OpKind::BitOr;
 Expr: ast::Expression = BinExpr<BitOrOp, XorExpr>;
 
-XorOp: ast::Operator = "^" => ast::Operator::BitXor;
+XorOp: ast::OpKind = "^" => ast::OpKind::BitXor;
 XorExpr: ast::Expression = BinExpr<XorOp, AndExpr>;
 
-BitAndOp: ast::Operator = "&" => ast::Operator::BitAnd;
+BitAndOp: ast::OpKind = "&" => ast::OpKind::BitAnd;
 AndExpr: ast::Expression = BinExpr<BitAndOp, ShiftExpr>;
 
-ShiftOp: ast::Operator = {
-    "<<" => ast::Operator::LeftShift,
-    ">>" => ast::Operator::RightShift,
+ShiftOp: ast::OpKind = {
+    "<<" => ast::OpKind::LeftShift,
+    ">>" => ast::OpKind::RightShift,
 };
 ShiftExpr: ast::Expression = BinExpr<ShiftOp, ArithExpr>;
 
-AddSubOp: ast::Operator = {
-    "+" => ast::Operator::Addition,
-    "-" => ast::Operator::Subtraction,
+AddSubOp: ast::OpKind = {
+    "+" => ast::OpKind::Addition,
+    "-" => ast::OpKind::Subtraction,
 };
 ArithExpr: ast::Expression = BinExpr<AddSubOp, Term>;
 
-MulDivModOp: ast::Operator = {
-    "*" => ast::Operator::Multiplication,
-    "@" => ast::Operator::MatrixMultiplication,
-    "/" => ast::Operator::Division,
-    "%" => ast::Operator::Modulo,
-    "//" => ast::Operator::FloorDivision,
+MulDivModOp: ast::OpKind = {
+    "*" => ast::OpKind::Multiplication,
+    "@" => ast::OpKind::MatrixMultiplication,
+    "/" => ast::OpKind::Division,
+    "%" => ast::OpKind::Modulo,
+    "//" => ast::OpKind::FloorDivision,
 };
 Term: ast::Expression = BinExpr<MulDivModOp, Factor>;
 
-UnaryOp: ast::UnaryOperator = {
-    "+" => ast::UnaryOperator::Plus,
-    "-" => ast::UnaryOperator::Minus,
-    "~" => ast::UnaryOperator::Invert,
+UnaryOp: ast::UnaryOpKind = {
+    "+" => ast::UnaryOpKind::Plus,
+    "-" => ast::UnaryOpKind::Minus,
+    "~" => ast::UnaryOpKind::Invert,
 };
 
 Factor: ast::Expression = {
     <l:@L> <op:UnaryOp> <f:Factor> <r:@R> => {
-        ast::ExpressionKind::UnaryOp { op, operand: Box::new(f) }.spanned(l, r)
+        ast::Expression::UnaryOp(ast::UnaryOp {
+            span: Span::new(l, r),
+            op,
+            operand: Box::new(f),
+        })
     },
     Power,
 };
@@ -692,11 +751,12 @@ Factor: ast::Expression = {
 Power: ast::Expression = <l:@L> <e:AwaitExpr> <f:("**" <Factor>)?> <r:@R> => {
     match f {
         Some(factor) => {
-            ast::ExpressionKind::BinOp {
+            ast::Expression::BinOp(ast::BinOp {
+                span: Span::new(l, r),
                 left: Box::new(e),
-                op: ast::Operator::Power,
+                op: ast::OpKind::Power,
                 right: Box::new(factor),
-            }.spanned(l, r)
+            })
         }
         _ => e,
     }
@@ -704,7 +764,10 @@ Power: ast::Expression = <l:@L> <e:AwaitExpr> <f:("**" <Factor>)?> <r:@R> => {
 
 AwaitExpr: ast::Expression = <l:@L> <a:"await"?> <e:AtomExpr> <r:@R> => {
     if a.is_some() {
-        ast::ExpressionKind::Await { value: Box::new(e) }.spanned(l, r)
+        ast::Expression::Await(ast::Await {
+            span: Span::new(l, r),
+            value: Box::new(e),
+        })
     } else {
         e
     }
@@ -713,20 +776,27 @@ AwaitExpr: ast::Expression = <l:@L> <a:"await"?> <e:AtomExpr> <r:@R> => {
 AtomExpr: ast::Expression = {
     <l:@L> <e:AtomExpr> "(" <a:ArgList?> ")" <r:@R> => {
         let (args, keywords) = a.unwrap_or_default();
-        ast::ExpressionKind::Call {
+        ast::Expression::Call(ast::Call {
+            span: Span::new(l, r),
             func: Box::new(e),
             args,
             keywords,
-        }.spanned(l, r)
+        })
     },
-    <l:@L> <e:AtomExpr> "[" <s:SubscriptList> "]" <r:@R> => ast::ExpressionKind::Subscript {
-        value: Box::new(e),
-        slice: s,
-    }.spanned(l, r),
-    <l:@L> <e:AtomExpr> "." <n:NAME> <r:@R> => ast::ExpressionKind::Attribute {
-        value: Box::new(e),
-        attr: n,
-    }.spanned(l, r),
+    <l:@L> <e:AtomExpr> "[" <s:SubscriptList> "]" <r:@R> => {
+        ast::Expression::Subscript(ast::Subscript {
+            span: Span::new(l, r),
+            value: Box::new(e),
+            slice: s,
+        })
+    },
+    <l:@L> <e:AtomExpr> "." <n:NAME> <r:@R> => {
+        ast::Expression::Attribute(ast::Attribute {
+            span: Span::new(l, r),
+            value: Box::new(e),
+            attr: n,
+        })
+    },
     Atom,
 };
 
@@ -753,9 +823,10 @@ Arg: (Option<ast::Expression>, Option<ast::Keyword>) = {
         (None, Some(kw))
     },
     <l:@L> "*" <t:Test> <r:@R> => {
-        let arg = ast::ExpressionKind::Starred {
+        let arg = ast::Expression::Starred(ast::Starred {
+            span: Span::new(l, r),
             value: Box::new(t),
-        }.spanned(l, r);
+        });
         (Some(arg), None)
     },
     "**" <Test> => { (None, Some(ast::Keyword { arg: None, value: Box::new(<>) })) },
@@ -775,10 +846,10 @@ SubscriptList: ast::Slice = <t:Subscript> <v:("," <Subscript>)*> <c:","?> => {
                     .chain(v.iter().map(slice_index))
                     .map(|x| x.unwrap().clone())
                     .collect::<Vec<_>>();
-                let tup = ast::Expression {
-                    span: Span::new(elts[0].span.start, elts.last().unwrap().span.end),
-                    kind: ast::ExpressionKind::Tuple { elts },
-                };
+                let tup = ast::Expression::Tuple(ast::Tuple {
+                    span: Span::new(elts[0].span().start, elts.last().unwrap().span().end),
+                    elts,
+                });
                 return ast::Slice::Index { value: Box::new(tup) }
             }
         }
@@ -804,62 +875,96 @@ Atom: ast::Expression = {
     "(" <GeneratorExp> ")",
     "(" <TestListStarExpr> ")",
     <l:@L> "[" <t:Test> <c:Comprehension+> "]" <r:@R> => {
-        ast::ExpressionKind::ListComp {
+        ast::Expression::ListComp(ast::ListComp {
+            span: Span::new(l, r),
             elt: Box::new(t),
             generators: c,
-        }.spanned(l, r)
+        })
     },
     <l:@L> "[" <v:Comma<TestOrStar>?> ","? "]" <r:@R> => {
-        ast::ExpressionKind::List { elts: v.unwrap_or_default() }.spanned(l, r)
+        ast::Expression::List(ast::List {
+            span: Span::new(l, r),
+            elts: v.unwrap_or_default(),
+        })
     },
     <l:@L> "{" <t:Test> <c:Comprehension+> "}" <r:@R> => {
-        ast::ExpressionKind::SetComp {
+        ast::Expression::SetComp(ast::SetComp {
+            span: Span::new(l, r),
             elt: Box::new(t),
             generators: c,
-        }.spanned(l, r)
+        })
     },
     <l:@L> "{" <v:Comma<TestOrStar>> ","? "}" <r:@R> => {
-        ast::ExpressionKind::Set { elts: v }.spanned(l, r)
+        ast::Expression::Set(ast::Set {
+            span: Span::new(l, r),
+            elts: v,
+        })
     },
     <l:@L> "{" <k:Test> ":" <v:Test> <c:Comprehension+> "}" <r:@R> => {
-        ast::ExpressionKind::DictComp {
+        ast::Expression::DictComp(ast::DictComp {
+            span: Span::new(l, r),
             key: Box::new(k),
             value: Box::new(v),
             generators: c,
-        }.spanned(l, r)
+        })
     },
     <l:@L> "{" <v:Comma<KeyValue>?> ","? "}" <r:@R> => {
         let (keys, values) = v.unwrap_or_default().into_iter().unzip();
-        ast::ExpressionKind::Dict { keys, values }.spanned(l, r)
+        ast::Expression::Dict(ast::Dict {
+            span: Span::new(l, r),
+            keys,
+            values,
+        })
     },
-    <l:@L> <id:NAME> <r:@R> => ast::ExpressionKind::Name { id }.spanned(l, r),
-    <l:@L> <n:Number> <r:@R> => ast::ExpressionKind::Num { n }.spanned(l, r),
-    <l:@L> <v:BYTES+> <r:@R> => ast::ExpressionKind::Bytes {
-        s: v.concat(),
-    }.spanned(l, r),
+    <l:@L> <id:NAME> <r:@R> => ast::Expression::Name(ast::Name {
+        span: Span::new(l, r),
+        id,
+    }),
+    <l:@L> <n:Number> <r:@R> => ast::Expression::Num(ast::Num {
+        span: Span::new(l, r),
+        value: n,
+    }),
+    <l:@L> <v:BYTES+> <r:@R> => ast::Expression::Bytes(ast::Bytes {
+        span: Span::new(l, r),
+        value: v.concat(),
+    }),
     <l:@L> <v:STRING+> <r:@R> => {
-        ast::ExpressionKind::Str { s: v.concat() }.spanned(l, r)
+        ast::Expression::Str(ast::Str {
+            span: Span::new(l, r),
+            value: v.concat(),
+        })
     },
     FSTRING+ => unimplemented!(),
-    <l:@L> "..." <r:@R> => ast::ExpressionKind::Ellipsis.spanned(l, r),
-    <l:@L> <c:NameConstant> <r:@R> => ast::ExpressionKind::NameConstant {
-        value: c,
-    }.spanned(l, r),
+    <l:@L> "..." <r:@R> => ast::Expression::Ellipsis(ast::Ellipsis {
+        span: Span::new(l, r),
+    }),
+    <l:@L> <c:NameConstant> <r:@R> => {
+        ast::Expression::NameConstant(ast::NameConstant {
+            span: Span::new(l, r),
+            value: c,
+        })
+    },
 };
 
 YieldExpr: ast::Expression = {
-    <l:@L> "yield" "from" <t:Test> <r:@R> => ast::ExpressionKind::YieldFrom {
-        value: Box::new(t),
-    }.spanned(l, r),
-    <l:@L> "yield" <t:TestList?> <r:@R> => ast::ExpressionKind::Yield {
-        value: t.map(Box::new),
-    }.spanned(l, r),
+    <l:@L> "yield" "from" <t:Test> <r:@R> => {
+        ast::Expression::YieldFrom(ast::YieldFrom {
+            span: Span::new(l, r),
+            value: Box::new(t),
+        })
+    },
+    <l:@L> "yield" <t:TestList?> <r:@R> => {
+        ast::Expression::Yield(ast::Yield {
+            span: Span::new(l, r),
+            value: t.map(Box::new),
+        })
+    },
 };
 
-Number: ast::Number = {
-    INTEGER => ast::Number::Integer(<>),
-    FLOAT => ast::Number::Float(<>),
-    IMAGINARY => ast::Number::Complex(<>),
+Number: ast::NumKind = {
+    INTEGER => ast::NumKind::Integer(<>),
+    FLOAT => ast::NumKind::Float(<>),
+    IMAGINARY => ast::NumKind::Complex(<>),
 };
 
 NameConstant: ast::Singleton = {
@@ -869,10 +974,11 @@ NameConstant: ast::Singleton = {
 };
 
 GeneratorExp: ast::Expression = <l:@L> <t:Test> <c:Comprehension+> <r:@R> => {
-    ast::ExpressionKind::GeneratorExp {
+    ast::Expression::GeneratorExp(ast::GeneratorExp {
+        span: Span::new(l, r),
         elt: Box::new(t),
         generators: c,
-    }.spanned(l, r)
+    })
 };
 
 Comprehension: ast::Comprehension = {
@@ -900,7 +1006,10 @@ SingleOrTuple<T>: ast::Expression = {
     <l:@L> <t:T> <v:("," <T>)*> <c:","?> <r:@R> => {
         if !v.is_empty() || c.is_some() {
             let elts = iter::once(t).chain(v).collect();
-            ast::ExpressionKind::Tuple { elts }.spanned(l, r)
+            ast::Expression::Tuple(ast::Tuple {
+                span: Span::new(l, r),
+                elts,
+            })
         } else {
             t
         }

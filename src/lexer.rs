@@ -1,73 +1,17 @@
-use std::{
-    collections::HashMap,
-    convert::TryInto,
-    fmt::{self, Display},
-};
+use std::{collections::HashMap, convert::TryInto};
 
 use num_bigint::BigUint;
 use regex::{CaptureLocations, Regex};
 
 use crate::{
+    error::{Error, ErrorKind},
     source::Location,
     token::{self, Token},
 };
 
 const TABSIZE: usize = 8;
 
-pub type LexResult = Result<(Location, Token, Location), LexError>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LexError {
-    pub kind: LexErrorKind,
-    pub location: Location,
-}
-
-impl LexError {
-    fn new(kind: LexErrorKind, location: Location) -> LexError {
-        LexError { kind, location }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LexErrorKind {
-    UnexpectedCharacter(char),
-    UnmatchedDedent,
-    MixedTabsAndSpaces,
-    NonAsciiBytes { offset: usize },
-    UnicodeDecode { offset: usize },
-    UnterminatedString,
-}
-
-impl Display for LexError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.kind)
-    }
-}
-
-impl Display for LexErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LexErrorKind::UnexpectedCharacter(c) => {
-                write!(f, "unexpected character {}", c)
-            }
-            LexErrorKind::UnmatchedDedent => {
-                write!(f, "unmatched indentation")
-            }
-            LexErrorKind::MixedTabsAndSpaces => {
-                write!(f, "inconsistent use of tabs and spaces")
-            }
-            LexErrorKind::NonAsciiBytes { .. } => {
-                write!(f, "bytes can only contains ASCII characters")
-            }
-            LexErrorKind::UnicodeDecode { .. } => {
-                write!(f, "malformed unicode escape")
-            },
-            LexErrorKind::UnterminatedString => {
-                write!(f, "unterminated string")
-            },
-        }
-    }
-}
+pub type LexResult = Result<(Location, Token, Location), Error>;
 
 struct ParseStringError {
     offset: usize,
@@ -82,6 +26,7 @@ impl ParseStringError {
         self.offset
     }
 }
+
 pub struct Lexer<'a> {
     input: &'a str,
     exhausted: bool,
@@ -244,10 +189,7 @@ impl<'a> Lexer<'a> {
         if TOKEN_RE.captures_read(&mut self.caps, self.input).is_none() {
             self.exhausted = true;
             let c = self.input.chars().next().unwrap();
-            return Err(LexError::new(
-                LexErrorKind::UnexpectedCharacter(c),
-                self.location,
-            ));
+            return Err(Error::new(ErrorKind::UnexpectedCharacter(c), self.location));
         }
 
         if self.newline && !(self.matches(1) || self.matches(2)) {
@@ -260,13 +202,13 @@ impl<'a> Lexer<'a> {
                 if self.alt_col != alt_last {
                     // "Fix" alt_col so we can recover from error
                     self.alt_col = alt_last;
-                    return Err(LexError::new(LexErrorKind::MixedTabsAndSpaces, emit_loc));
+                    return Err(Error::new(ErrorKind::MixedTabsAndSpaces, emit_loc));
                 }
             } else if col > last {
                 // Indent
                 if self.alt_col <= alt_last {
                     self.alt_col = alt_last;
-                    return Err(LexError::new(LexErrorKind::MixedTabsAndSpaces, emit_loc));
+                    return Err(Error::new(ErrorKind::MixedTabsAndSpaces, emit_loc));
                 }
                 self.indents.push((col, self.alt_col));
                 return Ok((emit_loc, Token::Indent, emit_loc));
@@ -279,11 +221,11 @@ impl<'a> Lexer<'a> {
                 let (last, alt_last) = *self.indents.last().unwrap();
                 if col != last {
                     self.exhausted = true;
-                    return Err(LexError::new(LexErrorKind::UnmatchedDedent, emit_loc));
+                    return Err(Error::new(ErrorKind::UnmatchedDedent, emit_loc));
                 }
                 if self.alt_col != alt_last {
                     self.alt_col = alt_last;
-                    return Err(LexError::new(LexErrorKind::MixedTabsAndSpaces, emit_loc));
+                    return Err(Error::new(ErrorKind::MixedTabsAndSpaces, emit_loc));
                 }
                 return self.get_token();
             }
@@ -334,7 +276,7 @@ impl<'a> Lexer<'a> {
             if self.matches(13) {
                 // Unterminated
                 self.exhausted = true;
-                return Err(LexError::new(LexErrorKind::UnterminatedString, start));
+                return Err(Error::new(ErrorKind::UnterminatedString, start));
             }
             let prefix = self
                 .caps
@@ -354,7 +296,7 @@ impl<'a> Lexer<'a> {
             if bytes {
                 let value = if !raw {
                     Self::parse_bytes(value).map_err(|e| {
-                        LexError::new(LexErrorKind::NonAsciiBytes { offset: e.offset() }, start)
+                        Error::new(ErrorKind::NonAsciiBytes { offset: e.offset() }, start)
                     })?
                 } else {
                     value.as_bytes().to_vec()
@@ -363,7 +305,7 @@ impl<'a> Lexer<'a> {
             } else {
                 let value = if !raw {
                     Self::parse_str(value).map_err(|e| {
-                        LexError::new(LexErrorKind::UnicodeDecode { offset: e.offset() }, start)
+                        Error::new(ErrorKind::UnicodeDecode { offset: e.offset() }, start)
                     })?
                 } else {
                     value.to_string()
@@ -505,7 +447,7 @@ mod tests {
     use super::*;
     use crate::token::Token::*;
 
-    fn lex(i: &str) -> Vec<Result<Token, LexErrorKind>> {
+    fn lex(i: &str) -> Vec<Result<Token, ErrorKind>> {
         Lexer::new(i)
             .map(|x| x.map(|x| x.1).map_err(|e| e.kind))
             .collect()
@@ -538,7 +480,7 @@ mod tests {
                 Ok(Indent),
                 Ok(Name("a".into())),
                 Ok(Newline),
-                Err(LexErrorKind::UnmatchedDedent),
+                Err(ErrorKind::UnmatchedDedent),
             ]
         );
         assert_eq!(
@@ -547,7 +489,7 @@ mod tests {
                 Ok(Indent),
                 Ok(Name("a".into())),
                 Ok(Newline),
-                Err(LexErrorKind::MixedTabsAndSpaces),
+                Err(ErrorKind::MixedTabsAndSpaces),
                 Ok(Name("b".into())),
                 Ok(Eof)
             ]

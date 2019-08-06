@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     ast,
-    lexer::LexError,
+    error::Error,
     source::{Location, Span},
     token::Token,
 };
@@ -1030,7 +1030,7 @@ Comma<T>: Vec<T> = Sep<T, ",">;
 
 extern {
     type Location = Location;
-    type Error = LexError;
+    type Error = Error;
 
     enum Token {
         MODULE => Token::Module,

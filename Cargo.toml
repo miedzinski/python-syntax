@@ -2,6 +2,9 @@
 name = "python-syntax"
 version = "0.1.0"
 authors = ["Dominik Miedziński <dominik@mdzn.pl>"]
+repository = "https://github.com/miedzinski/snek"
+description = "Python 3 parser"
+license = "MIT"
 edition = "2018"
 build = "build.rs"
 

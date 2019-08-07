@@ -38,7 +38,7 @@ impl error::Error for Error {
             ErrorKind::NonAsciiBytes { .. } => "bytes can only contains ASCII characters",
             ErrorKind::UnicodeDecode { .. } => "malformed unicode escape",
             ErrorKind::UnterminatedString => "unterminated string",
-            ErrorKind::UnexpectedToken { .. } => "unexpected token, expected one of: ",
+            ErrorKind::UnexpectedToken { .. } => "unexpected token",
             ErrorKind::UnexpectedEof => "unexpected EOF",
         }
     }
